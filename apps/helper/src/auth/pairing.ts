@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { maskToken } from '@agent-pulse/shared';
+import { maskToken, type WatchPushEnvironment } from '@agent-pulse/shared';
 
 const DEFAULT_PIN_TTL_MS = 5 * 60 * 1000;
 const GLOBAL_PAIRING_LIMIT_KEY = '__global_pairing_failures__';
@@ -13,6 +13,8 @@ export type DeviceRecord = {
   lastSeenAt?: string;
   revokedAt?: string;
   watchPushToken?: string;
+  watchPushBundleId?: string;
+  watchPushEnvironment?: WatchPushEnvironment;
   watchPushTokenUpdatedAt?: string;
 };
 
@@ -126,7 +128,11 @@ export class DeviceRegistry {
     return devices.filter((device) => !device.revokedAt);
   }
 
-  async setWatchPushToken(deviceId: string, watchPushToken: string | undefined): Promise<DeviceRecord | undefined> {
+  async setWatchPushToken(
+    deviceId: string,
+    watchPushToken: string | undefined,
+    metadata: { bundleId?: string; environment?: WatchPushEnvironment } = {}
+  ): Promise<DeviceRecord | undefined> {
     const devices = await this.store.list();
     const device = devices.find((candidate) => candidate.deviceId === deviceId);
 
@@ -137,9 +143,13 @@ export class DeviceRegistry {
     const next: DeviceRecord = { ...device };
     if (watchPushToken && watchPushToken.trim().length > 0) {
       next.watchPushToken = watchPushToken.trim();
+      next.watchPushBundleId = metadata.bundleId?.trim() || undefined;
+      next.watchPushEnvironment = metadata.environment;
       next.watchPushTokenUpdatedAt = this.now().toISOString();
     } else {
       delete next.watchPushToken;
+      delete next.watchPushBundleId;
+      delete next.watchPushEnvironment;
       delete next.watchPushTokenUpdatedAt;
     }
 

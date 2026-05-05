@@ -48,6 +48,7 @@ import {
   ThreadFileChangeActionResponseSchema,
   ThreadMessageRequestSchema,
   ThreadMessageResponseSchema,
+  THREAD_STATUS_PRIORITY,
   TranscriptCommentDraftRequestSchema,
   TranscriptCommentDraftResponseSchema,
   ThreadListResponseSchema,
@@ -55,8 +56,11 @@ import {
   ThreadModelUpdateResponseSchema,
   ThreadOpenRequestSchema,
   ThreadSchema,
+  WatchNotificationsSettingsSchema,
+  WatchNotificationsUpdateRequestSchema,
   WatchPushRegisterRequestSchema,
   WatchPushRegisterResponseSchema,
+  WatchSummaryResponseSchema,
   ThreadStopResponseSchema,
   ThreadTranscriptSchema,
   VoiceTranscriptionResponseSchema,
@@ -85,7 +89,8 @@ import {
   type ThreadFileChangeSummary,
   type ThreadListGroup,
   type ThreadMessageResponse,
-  type ThreadTranscript
+  type ThreadTranscript,
+  type WatchNotificationsSettings
 } from '@agent-pulse/shared';
 import { Hono, type Context } from 'hono';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -115,6 +120,12 @@ import {
 } from './workspace-display';
 import { normalizeEnabledProviders, type HelperSettings, type HelperSettingsStore } from './settings';
 import { createTabletDevProxy, type TabletDevProxy } from './tablet-dev-proxy';
+import {
+  checkWatchNotificationsConfig,
+  deliverWatchNotifications,
+  type DeliverWatchNotificationsOptions,
+  type WatchNotificationInput
+} from './watch-push';
 
 type ThreadOpener = ReturnType<typeof createThreadOpener>;
 
@@ -136,6 +147,7 @@ const MAX_OUTGOING_ATTACHMENTS = 6;
 const MAX_OUTGOING_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_OUTGOING_ATTACHMENT_TOTAL_BYTES = 16 * 1024 * 1024;
 const MAX_VOICE_TRANSCRIPTION_BYTES = 24_000_000;
+const WATCH_MESSAGE_MAX_CHARS = 500;
 const CHATGPT_TRANSCRIPTIONS_URL = 'https://chatgpt.com/backend-api/transcribe';
 const OPENAI_TRANSCRIPTIONS_URL = 'https://api.openai.com/v1/audio/transcriptions';
 const DEFAULT_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
@@ -320,6 +332,12 @@ export type AgentPulseServerOptions = {
   onLanModeChange?: (enabled: boolean) => Promise<void>;
   remoteAccess?: RemoteAccessController;
   voiceTranscriptionFetch?: typeof fetch;
+  watchPushSender?: (options: DeliverWatchNotificationsOptions) => Promise<{
+    ok: boolean;
+    delivered: number;
+    failed: number;
+    error?: string;
+  }>;
 };
 
 export type RemoteAccessController = {
@@ -449,6 +467,28 @@ function createApp(
   let autoDesktopRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   let autoDesktopRefreshInFlight = false;
   let currentSettings = options.settings;
+  const watchNotificationsSettings = (): WatchNotificationsSettings =>
+    WatchNotificationsSettingsSchema.parse({
+      enabled: false,
+      teamId: '',
+      keyId: '',
+      bundleId: 'com.paulfecto.AgentPulse.watchkitapp',
+      environment: 'sandbox',
+      keyPath: '',
+      lastError: '',
+      lastCheckedAt: null,
+      ...(currentSettings.watchNotifications ?? {})
+    });
+  const saveWatchNotificationsSettings = async (
+    watchNotifications: WatchNotificationsSettings
+  ): Promise<void> => {
+    const nextSettings: HelperSettings = {
+      ...currentSettings,
+      watchNotifications: WatchNotificationsSettingsSchema.parse(watchNotifications)
+    };
+    currentSettings = nextSettings;
+    await options.settingsStore.save(nextSettings);
+  };
   const isProviderEnabled = (provider: AgentProvider): boolean =>
     normalizeEnabledProviders(currentSettings.enabledProviders).includes(provider);
   const providerForThreadId = (threadId: string): AgentProvider => {
@@ -481,33 +521,35 @@ function createApp(
   const requestIp = (context: Context): string =>
     clientIp(context.req.raw, getConnInfo(context).remote.address, currentSettings);
 
-  // Watch APNs delivery hook. Today this only logs the intended push so the
-  // watch-side wiring (token registration, notification handling, deep-link
-  // routing) can be exercised end-to-end without an APNs key. To enable real
-  // delivery, replace the body with an APNs HTTP/2 client driven by the
-  // helper's settings (team id, key id, .p8 path, bundle id, environment).
-  const notifyWatchDevices = (input: {
-    threadId: string;
-    kind: 'finished' | 'errored' | 'attention';
-    title: string;
-    body: string;
-  }): void => {
-    void options.registry
-      .listDevicesWithWatchPush()
-      .then((devices) => {
-        if (devices.length === 0) return;
-        for (const device of devices) {
-          // eslint-disable-next-line no-console
-          console.info('[watch-push]', {
-            deviceId: device.deviceId,
-            kind: input.kind,
-            threadId: input.threadId,
-            title: input.title,
-            body: input.body
-          });
-        }
-      })
-      .catch(() => undefined);
+  const notifyWatchDevices = (input: WatchNotificationInput): void => {
+    void (async () => {
+      const settings = watchNotificationsSettings();
+      if (!settings.enabled) return;
+
+      const devices = await options.registry.listDevicesWithWatchPush();
+      if (devices.length === 0) return;
+
+      const result = await (options.watchPushSender ?? deliverWatchNotifications)({
+        settings,
+        targets: devices.map((device) => ({
+          deviceId: device.deviceId,
+          token: device.watchPushToken ?? '',
+          bundleId: device.watchPushBundleId,
+          environment: device.watchPushEnvironment
+        })),
+        notification: input
+      });
+      await saveWatchNotificationsSettings({
+        ...settings,
+        lastCheckedAt: new Date().toISOString(),
+        lastError: result.ok ? '' : result.error ?? 'Watch push delivery failed.'
+      });
+      if (!result.ok) {
+        console.warn('[watch-push]', result.error ?? 'Watch push delivery failed.');
+      }
+    })().catch((error) => {
+      console.warn('[watch-push]', error instanceof Error ? error.message : String(error));
+    });
   };
 
   const maybeNotifyWatchOfStatusChange = (threadId: string, nextStatus: Thread['status']): void => {
@@ -519,6 +561,7 @@ function createApp(
       notifyWatchDevices({
         threadId,
         kind: 'finished',
+        serverName: 'Agent Pulse',
         title: 'Agent finished',
         body: 'Open Agent Pulse to review the result.'
       });
@@ -528,6 +571,7 @@ function createApp(
       notifyWatchDevices({
         threadId,
         kind: 'errored',
+        serverName: 'Agent Pulse',
         title: 'Agent errored',
         body: 'Tap to open the thread.'
       });
@@ -537,6 +581,7 @@ function createApp(
       notifyWatchDevices({
         threadId,
         kind: 'attention',
+        serverName: 'Agent Pulse',
         title: 'Agent needs you',
         body: 'A pending approval is waiting.'
       });
@@ -1302,7 +1347,8 @@ function createApp(
     const remoteAccess = options.remoteAccess?.getStatus() ?? currentSettings.remoteAccess;
     currentSettings = {
       ...currentSettings,
-      remoteAccess
+      remoteAccess,
+      watchNotifications: watchNotificationsSettings()
     };
 
     return context.json({
@@ -1437,6 +1483,51 @@ function createApp(
     return context.json({ ok: true, settings: nextSettings });
   });
 
+  app.post('/settings/watch-notifications/check', async (context) => {
+    if (!isAdminRequest(context.req.raw, options.adminAuth)) {
+      return adminForbidden(context);
+    }
+
+    const settings = watchNotificationsSettings();
+    const check = await checkWatchNotificationsConfig(settings);
+    const nextWatchNotifications = WatchNotificationsSettingsSchema.parse({
+      ...settings,
+      lastCheckedAt: new Date().toISOString(),
+      lastError: check.ok ? '' : check.error
+    });
+    await saveWatchNotificationsSettings(nextWatchNotifications);
+    return context.json({
+      ok: check.ok,
+      watchNotifications: nextWatchNotifications,
+      ...(check.ok ? {} : { error: check.error })
+    });
+  });
+
+  app.post('/settings/watch-notifications', async (context) => {
+    if (!isAdminRequest(context.req.raw, options.adminAuth)) {
+      return adminForbidden(context);
+    }
+
+    const parsed = WatchNotificationsUpdateRequestSchema.parse(await context.req.json().catch(() => ({})));
+    const existing = watchNotificationsSettings();
+    const nextWatchNotifications = WatchNotificationsSettingsSchema.parse({
+      ...existing,
+      ...(parsed.enabled !== undefined ? { enabled: parsed.enabled } : {}),
+      ...(parsed.teamId !== undefined ? { teamId: parsed.teamId.trim() } : {}),
+      ...(parsed.keyId !== undefined ? { keyId: parsed.keyId.trim() } : {}),
+      ...(parsed.bundleId !== undefined ? { bundleId: parsed.bundleId.trim() } : {}),
+      ...(parsed.environment !== undefined ? { environment: parsed.environment } : {}),
+      ...(parsed.keyPath !== undefined ? { keyPath: parsed.keyPath.trim() } : {}),
+      ...(parsed.enabled === false ? { lastError: '' } : {})
+    });
+    await saveWatchNotificationsSettings(nextWatchNotifications);
+    return context.json({
+      ok: true,
+      watchNotifications: nextWatchNotifications,
+      settings: currentSettings
+    });
+  });
+
   app.post('/settings/providers', async (context) => {
     if (!isAdminRequest(context.req.raw, options.adminAuth)) {
       return adminForbidden(context);
@@ -1481,6 +1572,59 @@ function createApp(
       threads,
       ...(groups.length > 0 ? { groups } : {})
     }));
+  });
+
+  app.get('/watch/summary', async (context) => {
+    const auth = await authenticate(context);
+    if (!auth.ok) {
+      return context.json({ error: auth.reason }, auth.reason === 'revoked' ? 403 : 401);
+    }
+
+    const { threads } = await listAllThreads();
+    const remoteAccess = options.remoteAccess?.getStatus() ?? currentSettings.remoteAccess;
+    const requestUrl = new URL(context.req.url);
+    const baseUrl = `${requestUrl.protocol}//${requestUrl.host}`;
+    const statusRank = new Map(THREAD_STATUS_PRIORITY.map((status, index) => [status, index]));
+    const compactThreads = [...threads]
+      .sort((left, right) => {
+        const statusDelta =
+          (statusRank.get(left.status) ?? THREAD_STATUS_PRIORITY.length) -
+          (statusRank.get(right.status) ?? THREAD_STATUS_PRIORITY.length);
+        if (statusDelta !== 0) return statusDelta;
+        return Date.parse(right.lastActivityAt) - Date.parse(left.lastActivityAt);
+      })
+      .slice(0, 12)
+      .map((thread) => ({
+        threadId: thread.threadId,
+        provider: thread.provider,
+        providerThreadId: thread.providerThreadId,
+        title: thread.title,
+        workspace: thread.workspace,
+        workspaceKind: thread.workspaceKind,
+        status: thread.status,
+        lastActivityAt: thread.lastActivityAt,
+        lastTurnSummary: thread.lastTurnSummary
+      }));
+
+    return context.json(
+      WatchSummaryResponseSchema.parse({
+        server: {
+          helperName: 'Agent Pulse',
+          version: options.version,
+          baseUrl,
+          ...(remoteAccess.enabled && remoteAccess.publicUrl
+            ? { remoteUrl: remoteAccess.publicUrl }
+            : {})
+        },
+        remoteAccess: {
+          enabled: remoteAccess.enabled,
+          status: remoteAccess.status,
+          publicUrl: remoteAccess.publicUrl,
+          hostname: remoteAccess.hostname
+        },
+        threads: compactThreads
+      })
+    );
   });
 
   app.get('/projects/list', async (context) => {
@@ -2153,6 +2297,12 @@ function createApp(
     }
 
     const parsed = ThreadMessageRequestSchema.parse(await context.req.json());
+    if (
+      context.req.header('x-agent-pulse-client') === 'watch' &&
+      (parsed.text?.length ?? 0) > WATCH_MESSAGE_MAX_CHARS
+    ) {
+      return context.json({ error: `Watch messages must be ${WATCH_MESSAGE_MAX_CHARS} characters or fewer.` }, 400);
+    }
     const threadId = context.req.param('threadId');
     let outgoingAttachments: PreparedOutgoingAttachments;
     try {
@@ -2601,11 +2751,8 @@ function createApp(
   });
 
   // Watch APNs registration: stores the watch's APNs device token against the
-  // already-paired DeviceRecord. Actual push delivery is performed by
-  // `notifyWatchDevices` below; today that is a stub that logs the intent so
-  // the watch wiring is testable without an APNs key. To enable real delivery,
-  // replace the stub body with an APNs HTTP/2 client (e.g. `apn2`) using
-  // settings sourced from `options`.
+  // already-paired DeviceRecord. Delivery is handled by the status-transition
+  // hook above and uses the helper APNs settings as the trusted server side.
   app.post('/devices/watch-push', async (context) => {
     const auth = await authenticate(context);
     if (!auth.ok) {
@@ -2617,7 +2764,10 @@ function createApp(
       return context.json({ error: 'Request body required.' }, 400);
     }
     const parsed = WatchPushRegisterRequestSchema.parse(rawBody);
-    await options.registry.setWatchPushToken(auth.device.deviceId, parsed.pushToken);
+    await options.registry.setWatchPushToken(auth.device.deviceId, parsed.pushToken, {
+      bundleId: parsed.bundleId,
+      environment: parsed.environment
+    });
     return context.json(WatchPushRegisterResponseSchema.parse({ ok: true }));
   });
 

@@ -25,7 +25,9 @@ import {
   type ThreadListGroup,
   type TouchCommand,
   type TranscriptCommentDraft,
-  type ThreadTranscript
+  type ThreadTranscript,
+  type WatchNotificationsSettings,
+  type WatchNotificationsUpdateRequest
 } from '@agent-pulse/shared';
 import {
   AlertTriangle,
@@ -44,7 +46,8 @@ import {
   ShieldCheck,
   Sun,
   Tablet,
-  Trash2
+  Trash2,
+  Watch
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -56,6 +59,7 @@ import {
   applyThreadFileChangeAction,
   clearAdminToken,
   clearSession,
+  checkWatchNotifications,
   checkRemoteAccess,
   createTranscriptCommentDraft,
   createHandoffSummaryDraft,
@@ -97,6 +101,7 @@ import {
   transcribeVoiceAudio,
   updateRemoteAccess,
   updateEnabledProviders,
+  updateWatchNotifications,
   updateThreadModel,
   AgentPulseApiError,
   type AgentPulseSession
@@ -3269,11 +3274,13 @@ function SettingsScreen({
   const [mobileSendEnabled, setMobileSendEnabled] = useState(false);
   const [enabledProviders, setEnabledProviders] = useState<AgentProvider[]>(() => [...AGENT_PROVIDERS]);
   const [remoteAccess, setRemoteAccess] = useState<RemoteAccessSettings>(() => defaultRemoteAccess());
+  const [watchNotifications, setWatchNotifications] = useState<WatchNotificationsSettings>(() => defaultWatchNotifications());
   const [devices, setDevices] = useState<AdminDevice[]>([]);
   const [selectedPairDeviceId, setSelectedPairDeviceId] = useState('');
   const [devicePins, setDevicePins] = useState<Record<string, AdminPairingPin>>({});
   const { theme, setTheme } = useThemePreference();
   const remoteTone = remoteAccess.status === 'healthy' ? 'green' : remoteAccess.enabled ? 'blue' : 'gray';
+  const watchTone = watchNotifications.lastError ? 'red' : watchNotifications.enabled ? 'green' : 'gray';
 
   useEffect(() => {
     adminFetch('/settings/get', adminToken)
@@ -3289,6 +3296,7 @@ function SettingsScreen({
         setEnabledProviders(normalizeEnabledProvidersForUi(payload.settings?.enabledProviders));
         const nextRemote = payload.settings?.remoteAccess ?? defaultRemoteAccess();
         setRemoteAccess(nextRemote);
+        setWatchNotifications(payload.settings?.watchNotifications ?? defaultWatchNotifications());
         const activeDevices = activeAdminDevices(payload.devices ?? []);
         setDevices(activeDevices);
         setSelectedPairDeviceId((current) =>
@@ -3434,6 +3442,7 @@ function SettingsScreen({
           <SettingsStat label="LAN access" value={lanEnabled ? 'On' : 'Off'} tone={lanEnabled ? 'green' : 'gray'} />
           <SettingsStat label="Mobile chat" value={mobileSendEnabled ? 'On' : 'Off'} tone={mobileSendEnabled ? 'blue' : 'gray'} />
           <SettingsStat label="Remote" value={remoteStatusLabel(remoteAccess)} tone={remoteTone} />
+          <SettingsStat label="Watch" value={watchNotifications.enabled ? 'On' : 'Off'} tone={watchTone} />
           <SettingsStat label="Devices" value={String(devices.length)} tone="neutral" />
         </div>
       </section>
@@ -3488,6 +3497,18 @@ function SettingsScreen({
           remoteAccess={remoteAccess}
           onCheck={() => void refreshRemoteAccess()}
           onProtocolChange={(protocol) => void updateTunnelProtocol(protocol)}
+        />
+
+        <WatchNotificationsPanel
+          watchNotifications={watchNotifications}
+          onSave={async (input) => {
+            const next = await updateWatchNotifications(adminToken, input);
+            setWatchNotifications(next);
+          }}
+          onCheck={async () => {
+            const next = await checkWatchNotifications(adminToken);
+            setWatchNotifications(next);
+          }}
         />
 
         <section className="settings-panel pair-panel">
@@ -3757,6 +3778,164 @@ function RemoteAccessPanel({
   );
 }
 
+function WatchNotificationsPanel({
+  watchNotifications,
+  onSave,
+  onCheck
+}: {
+  watchNotifications: WatchNotificationsSettings;
+  onSave: (input: WatchNotificationsUpdateRequest) => Promise<void>;
+  onCheck: () => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(watchNotifications);
+  const [busy, setBusy] = useState<'save' | 'check' | undefined>();
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setDraft(watchNotifications);
+  }, [watchNotifications]);
+
+  const statusLabel = watchNotifications.lastError
+    ? 'Needs setup'
+    : watchNotifications.enabled
+      ? 'Enabled'
+      : 'Off';
+  const tone = watchNotifications.lastError ? 'red' : watchNotifications.enabled ? 'green' : 'gray';
+
+  const updateDraft = <Key extends keyof WatchNotificationsSettings>(
+    key: Key,
+    value: WatchNotificationsSettings[Key]
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      [key]: value
+    }));
+  };
+
+  const saveDraft = async () => {
+    setBusy('save');
+    setError('');
+    try {
+      await onSave({
+        enabled: draft.enabled,
+        teamId: draft.teamId,
+        keyId: draft.keyId,
+        bundleId: draft.bundleId,
+        environment: draft.environment,
+        keyPath: draft.keyPath
+      });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not save watch notifications.');
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  const checkConfig = async () => {
+    setBusy('check');
+    setError('');
+    try {
+      await onCheck();
+    } catch (checkError) {
+      setError(checkError instanceof Error ? checkError.message : 'Could not check watch notifications.');
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  return (
+    <section className="settings-panel settings-panel-wide watch-panel">
+      <PanelHeading
+        icon={<Watch size={22} />}
+        title="Apple Watch"
+        description="Send private, compact APNs alerts when a watched thread finishes, errors, or needs attention."
+      />
+
+      <div className="watch-settings-status">
+        <span className={`status-chip tone-${tone}`}>{statusLabel}</span>
+        {watchNotifications.lastCheckedAt ? (
+          <span>Checked {new Date(watchNotifications.lastCheckedAt).toLocaleString()}</span>
+        ) : null}
+      </div>
+      {watchNotifications.lastError ? <p className="settings-error">{watchNotifications.lastError}</p> : null}
+      {error ? <p className="settings-error">{error}</p> : null}
+
+      <div className="watch-settings-grid">
+        <label className="watch-settings-toggle">
+          <input
+            type="checkbox"
+            checked={draft.enabled}
+            onChange={(event) => updateDraft('enabled', event.currentTarget.checked)}
+          />
+          Watch notifications
+        </label>
+        <label>
+          Environment
+          <select
+            value={draft.environment}
+            onChange={(event) =>
+              updateDraft('environment', event.currentTarget.value as WatchNotificationsSettings['environment'])
+            }
+          >
+            <option value="sandbox">Sandbox</option>
+            <option value="production">Production</option>
+          </select>
+        </label>
+        <label>
+          Team ID
+          <input
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            value={draft.teamId}
+            onChange={(event) => updateDraft('teamId', event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          Key ID
+          <input
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            value={draft.keyId}
+            onChange={(event) => updateDraft('keyId', event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          Bundle ID
+          <input
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            value={draft.bundleId}
+            onChange={(event) => updateDraft('bundleId', event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          APNs key path
+          <input
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            value={draft.keyPath}
+            onChange={(event) => updateDraft('keyPath', event.currentTarget.value)}
+          />
+        </label>
+      </div>
+
+      <div className="settings-panel-actions">
+        <button className="secondary-action" type="button" onClick={() => void saveDraft()} disabled={Boolean(busy)}>
+          {busy === 'save' ? 'Saving' : 'Save'}
+        </button>
+        <button className="secondary-action" type="button" onClick={() => void checkConfig()} disabled={Boolean(busy)}>
+          <RefreshCw size={16} />
+          {busy === 'check' ? 'Checking' : 'Check APNs'}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function ChecklistItem({ label, done }: { label: string; done: boolean }) {
   return (
     <span className={`checklist-item ${done ? 'is-done' : ''}`}>
@@ -3955,7 +4134,7 @@ function SettingsStat({
 }: {
   label: string;
   value: string;
-  tone: 'green' | 'blue' | 'gray' | 'neutral';
+  tone: 'green' | 'blue' | 'gray' | 'red' | 'neutral';
 }) {
   return (
     <div className={`settings-stat tone-${tone}`}>
@@ -4040,6 +4219,19 @@ function defaultRemoteAccess(): RemoteAccessSettings {
       tunnelRunning: false,
       hostnameAssigned: false
     }
+  };
+}
+
+function defaultWatchNotifications(): WatchNotificationsSettings {
+  return {
+    enabled: false,
+    teamId: '',
+    keyId: '',
+    bundleId: 'com.paulfecto.AgentPulse.watchkitapp',
+    environment: 'sandbox',
+    keyPath: '',
+    lastError: '',
+    lastCheckedAt: null
   };
 }
 

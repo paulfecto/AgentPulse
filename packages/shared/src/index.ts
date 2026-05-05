@@ -150,6 +150,34 @@ export const RemoteAccessSettingsSchema = z.object({
 
 export type RemoteAccessSettings = z.infer<typeof RemoteAccessSettingsSchema>;
 
+export const WatchPushEnvironmentSchema = z.enum(['sandbox', 'production']);
+
+export type WatchPushEnvironment = z.infer<typeof WatchPushEnvironmentSchema>;
+
+export const WatchNotificationsSettingsSchema = z.object({
+  enabled: z.boolean(),
+  teamId: z.string(),
+  keyId: z.string(),
+  bundleId: z.string(),
+  environment: WatchPushEnvironmentSchema,
+  keyPath: z.string(),
+  lastError: z.string(),
+  lastCheckedAt: isoUtcTimestamp.nullable()
+});
+
+export type WatchNotificationsSettings = z.infer<typeof WatchNotificationsSettingsSchema>;
+
+export const WatchNotificationsUpdateRequestSchema = z.object({
+  enabled: z.boolean().optional(),
+  teamId: z.string().max(80).optional(),
+  keyId: z.string().max(80).optional(),
+  bundleId: z.string().max(240).optional(),
+  environment: WatchPushEnvironmentSchema.optional(),
+  keyPath: z.string().max(1000).optional()
+});
+
+export type WatchNotificationsUpdateRequest = z.infer<typeof WatchNotificationsUpdateRequestSchema>;
+
 export const RemoteActivityLogEntrySchema = z.object({
   id: z.string().min(1),
   type: z.enum([
@@ -219,7 +247,7 @@ export const PairLookupResponseSchema = z.object({
 export const WatchPushRegisterRequestSchema = z.object({
   pushToken: z.string().trim().min(8).max(512),
   bundleId: z.string().trim().min(1).max(240).optional(),
-  environment: z.enum(['sandbox', 'production']).optional()
+  environment: WatchPushEnvironmentSchema.optional()
 });
 
 export const WatchPushRegisterResponseSchema = z.object({
@@ -433,6 +461,38 @@ export const ThreadListResponseSchema = z.object({
   threads: z.array(ThreadSchema),
   groups: z.array(ThreadListGroupSchema).optional()
 });
+
+export const WatchSummaryThreadSchema = ThreadSchema.pick({
+  threadId: true,
+  provider: true,
+  providerThreadId: true,
+  title: true,
+  workspace: true,
+  workspaceKind: true,
+  status: true,
+  lastActivityAt: true,
+  lastTurnSummary: true
+});
+
+export type WatchSummaryThread = z.input<typeof WatchSummaryThreadSchema>;
+
+export const WatchSummaryResponseSchema = z.object({
+  server: z.object({
+    helperName: z.string().min(1),
+    version: z.string().min(1),
+    baseUrl: z.string().min(1),
+    remoteUrl: z.string().min(1).optional()
+  }),
+  remoteAccess: z.object({
+    enabled: z.boolean(),
+    status: RemoteAccessStatusSchema,
+    publicUrl: z.string(),
+    hostname: z.string()
+  }),
+  threads: z.array(WatchSummaryThreadSchema).max(12)
+});
+
+export type WatchSummaryResponse = z.input<typeof WatchSummaryResponseSchema>;
 
 export const ProjectListResponseSchema = z.object({
   projects: z.array(ProjectSchema)

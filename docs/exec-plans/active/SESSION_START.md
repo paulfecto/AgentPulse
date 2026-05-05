@@ -1,7 +1,7 @@
 # Session Start
 
-- active task: `agentos-downstream-adoption`
-- plan: `docs/exec-plans/active/agentos-downstream-adoption.md`
+- active task: `apple-watch-support`
+- plan: `docs/exec-plans/active/apple-watch-support.md`
 - owner lane: `codex`
 - current status: `in-progress`
 - next proof gate: no outstanding proof gates

@@ -1,7 +1,7 @@
 {
-  "last_heartbeat_at": "2026-05-05T03:30:13Z",
+  "last_heartbeat_at": "2026-05-05T04:05:58Z",
   "owner_lane": "codex",
-  "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+  "plan": "docs/exec-plans/active/apple-watch-support.md",
   "status": "in-progress",
-  "task_id": "agentos-downstream-adoption"
+  "task_id": "apple-watch-support"
 }

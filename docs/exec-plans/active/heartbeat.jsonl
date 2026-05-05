@@ -1,3 +1,5 @@
-{"task_id":"agentos-downstream-adoption","owner_lane":"codex","status":"in-progress","ts":"2026-05-05T02:49:46Z","message":"AgentOS downstream adoption active; adapter gates in progress."}
-{"task_id":"agentos-downstream-adoption","owner_lane":"codex","status":"in-progress","ts":"2026-05-05T03:25:11Z","message":"AgentOS downstream adoption validation moved to Docker-only checks before commit."}
-{"task_id":"agentos-downstream-adoption","owner_lane":"codex","status":"in-progress","ts":"2026-05-05T03:30:13Z","message":"Docker product checks passed with TMPDIR=/worktmp after confirming /tmp project paths are intentionally filtered."}
+{"task_id":"apple-watch-support","owner_lane":"codex","status":"in-progress","ts":"2026-05-05T03:41:37Z","message":"Apple Watch support sprint active; implementing APNs helper hooks, compact watch API, tablet settings, and native watchOS source."}
+{"task_id":"apple-watch-support","owner_lane":"codex","status":"validation-in-progress","ts":"2026-05-05T03:57:15Z","message":"Docker product tests/typecheck/build passed; AgentOS upstream pin restored and progress ledger refresh is next."}
+{"task_id":"apple-watch-support","owner_lane":"codex","status":"validation-in-progress","ts":"2026-05-05T04:03:43Z","message":"AgentOS checklist and ledger refreshed; rerunning final Docker harness gates."}
+{"task_id":"apple-watch-support","owner_lane":"codex","status":"validation-complete","ts":"2026-05-05T04:04:28Z","message":"Docker product and AgentOS gates passed; preparing final cleanup, commit, and push."}
+{"task_id":"apple-watch-support","owner_lane":"codex","status":"in-progress","ts":"2026-05-05T04:05:58Z","message":"Keeping task claim active for the configured AgentOS start-stage gate before commit."}

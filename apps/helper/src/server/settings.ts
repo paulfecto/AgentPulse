@@ -7,7 +7,8 @@ import {
   AGENT_PROVIDERS,
   AgentProviderSchema,
   type AgentProvider,
-  type RemoteAccessSettings
+  type RemoteAccessSettings,
+  type WatchNotificationsSettings
 } from '@agent-pulse/shared';
 
 export type HelperSettings = {
@@ -16,6 +17,7 @@ export type HelperSettings = {
   mobileSendEnabled: boolean;
   enabledProviders?: AgentProvider[];
   remoteAccess: RemoteAccessSettings;
+  watchNotifications?: WatchNotificationsSettings;
 };
 
 export class HelperSettingsStore {
@@ -79,6 +81,16 @@ async function mergeSettings(
   settingsPath: string
 ): Promise<HelperSettings> {
   const defaults = await defaultSettings(settingsPath);
+  const defaultWatchNotifications = defaults.watchNotifications ?? {
+    enabled: false,
+    teamId: '',
+    keyId: '',
+    bundleId: 'com.paulfecto.AgentPulse.watchkitapp',
+    environment: 'sandbox' as const,
+    keyPath: '',
+    lastError: '',
+    lastCheckedAt: null
+  };
   return {
     ...defaults,
     ...stored,
@@ -90,6 +102,15 @@ async function mergeSettings(
         ...defaults.remoteAccess.checklist,
         ...(stored.remoteAccess?.checklist ?? {})
       }
+    },
+    watchNotifications: {
+      ...defaultWatchNotifications,
+      ...(stored.watchNotifications ?? {}),
+      environment:
+        stored.watchNotifications?.environment === 'production'
+          ? 'production'
+          : defaultWatchNotifications.environment,
+      lastCheckedAt: stored.watchNotifications?.lastCheckedAt ?? defaultWatchNotifications.lastCheckedAt
     }
   };
 }
@@ -124,6 +145,16 @@ async function defaultSettings(settingsPath: string): Promise<HelperSettings> {
         tunnelRunning: false,
         hostnameAssigned: false
       }
+    },
+    watchNotifications: {
+      enabled: false,
+      teamId: '',
+      keyId: '',
+      bundleId: 'com.paulfecto.AgentPulse.watchkitapp',
+      environment: 'sandbox',
+      keyPath: '',
+      lastError: '',
+      lastCheckedAt: null
     }
   };
 }

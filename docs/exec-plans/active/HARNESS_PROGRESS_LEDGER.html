@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="agentos-ledger-template-version" content="3">
-  <meta name="agentos-ledger-fingerprint" content="d08b03f5dc25999caed1d95a6a1bf7af34fc8d0507039613b966e1a28a7c2fbe">
+  <meta name="agentos-ledger-fingerprint" content="7c56228a35d3973797874931da5edb5478b27fce4871377e56533b9eb386b24c">
   <title>AgentOS Progress Ledger</title>
   <style>
     :root {
@@ -48,7 +48,7 @@
 <body>
   <main>
     <h1>AgentOS Progress Ledger</h1>
-    <p class="meta">Generated at 2026-05-05T03:30:32Z from the active execution plans. This ledger is an operator-visible projection of current plan state, validation evidence, TDD evidence, and review evidence. It is not a cryptographically signed audit record and does not replace the underlying execution plans.</p>
+    <p class="meta">Generated at 2026-05-05T04:06:18Z from the active execution plans. This ledger is an operator-visible projection of current plan state, validation evidence, TDD evidence, and review evidence. It is not a cryptographically signed audit record and does not replace the underlying execution plans.</p>
     <section class="summary">
       <div class="summary-card"><span>Active plans</span><strong>1</strong></div>
       <div class="summary-card"><span>Completed plans</span><strong>0</strong></div>
@@ -58,19 +58,19 @@
 
       <article class="card">
         <header>
-          <h2>agentos-downstream-adoption.md</h2>
+          <h2>apple-watch-support.md</h2>
           <span class="badge stage-validating">validating</span>
         </header>
-        <p class="target">AgentPulse has a checked-in AgentOS adapter that points to `dope-ai-kr/agentOS` at `11274a64f909ea1ee0a3c92455b4d291ba8ea344`. Future repo work enters through the Codex-primary...</p>
+        <p class="target">The helper can persist watch APNs settings, validate the configured APNs key material, and send minimal APNs pushes through Node built-ins only. Paired watch devices can registe...</p>
         <div class="meter"><span style="width:85%"></span></div>
         <dl>
-          <div><dt>Layer</dt><dd>Owner: `codex` Layer: repo harness adapter and documentation surfaces. Product runtime ownership remains in `apps/helper`, `apps/tablet`, and `packages/shared`.</dd></div>
-          <div><dt>State</dt><dd>validation-complete for downstream adoption.</dd></div>
-          <div><dt>Ready</dt><dd>yes for the AgentOS adapter adoption; app behavior is unchanged and Docker test/type/build gates passed.</dd></div>
-          <div><dt>Write set</dt><dd>`AGENTS.md`, `HARNESS_VERSION`, `repo_harness.toml`, `CONTEXT.md` `.gitignore` `docs/HARNESS_CHECKLIST.md`, `docs/HARNESS_GUIDE.md`, `docs/MCP_CONTRACT.md`, `docs/adr/` `docs/ex...</dd></div>
-          <div><dt>Validation</dt><dd>commands run: `bash ../agentOS-upstream-main/scripts/harness/install.sh --repo &quot;$PWD&quot; --accept-adoption-plan` succeeded; Docker AgentOS gate passed with `verify_harness.py`, `ve...</dd></div>
-          <div><dt>TDD</dt><dd>red signal: not required for this adapter-only adoption. red artifact: not recorded because no product behavior contract was changed. green result: Docker `pnpm test` passed 33...</dd></div>
-          <div><dt>Review</dt><dd>reviewer: `codex` review artifact: `docs/exec-plans/active/agentos-downstream-adoption.md` unresolved findings: no product-source changes; local package manager remains unavaila...</dd></div>
+          <div><dt>Layer</dt><dd>Owner: `codex` Product layers: shared contracts, helper server/auth/settings, tablet settings UI, and native watchOS client. Runtime owner remains the helper as trusted backend;...</dd></div>
+          <div><dt>State</dt><dd>validation-complete.</dd></div>
+          <div><dt>Ready</dt><dd>yes for the checked-in helper/tablet/watch source changes; host-side watchOS signing/build remains external manual validation.</dd></div>
+          <div><dt>Write set</dt><dd>`docs/exec-plans/active/apple-watch-support.md` `docs/exec-plans/active/task-claim.json` `docs/exec-plans/active/resume-state.json` `docs/exec-plans/active/heartbeat.jsonl` `doc...</dd></div>
+          <div><dt>Validation</dt><dd>Docker targeted watch/helper/tablet check passed: `pnpm exec vitest run apps/helper/src/server/watch-push.test.ts apps/helper/src/server/agent-pulse-server.test.ts apps/tablet/s...</dd></div>
+          <div><dt>TDD</dt><dd>red signal: first Docker targeted run exposed two regressions: the admin settings response shape test needed the new `watchNotifications` field, and the tablet had duplicate `Ch...</dd></div>
+          <div><dt>Review</dt><dd>reviewer: `codex` using `.agents/skills/harness-reviewer`. one source of truth: shared schemas in `packages/shared/src/index.ts` own watch settings and summary contracts; helper...</dd></div>
         </dl>
       </article>
     </section>

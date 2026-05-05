@@ -29,6 +29,7 @@ import {
   ThreadTranscriptSchema,
   VoiceTranscriptionResponseSchema,
   OlderThreadMessagesResponseSchema,
+  WatchNotificationsSettingsSchema,
   ThreadListResponseSchema,
   type CollaborationModeKind,
   type ApprovalDecisionRequest,
@@ -58,7 +59,9 @@ import {
   type TranscriptCommentDraft,
   type ThreadTranscript,
   type VoiceTranscriptionResponse,
-  type OlderThreadMessagesResponse
+  type OlderThreadMessagesResponse,
+  type WatchNotificationsSettings,
+  type WatchNotificationsUpdateRequest
 } from '@agent-pulse/shared';
 import { z } from 'zod';
 
@@ -88,6 +91,7 @@ export type HelperSettingsSnapshot = {
   mobileSendEnabled?: boolean;
   enabledProviders?: AgentProvider[];
   remoteAccess?: RemoteAccessSettings;
+  watchNotifications?: WatchNotificationsSettings;
 };
 
 // Thrown when a transcript fetch is aborted by our local timeout. Callers that already
@@ -180,6 +184,17 @@ export async function updateRemoteAccess(
   return remoteAccessPost('/settings/remote-access', token, input);
 }
 
+export async function checkWatchNotifications(token: string): Promise<WatchNotificationsSettings> {
+  return watchNotificationsPost('/settings/watch-notifications/check', token);
+}
+
+export async function updateWatchNotifications(
+  token: string,
+  input: WatchNotificationsUpdateRequest
+): Promise<WatchNotificationsSettings> {
+  return watchNotificationsPost('/settings/watch-notifications', token, input);
+}
+
 export async function updateEnabledProviders(
   token: string,
   enabledProviders: AgentProvider[]
@@ -224,6 +239,24 @@ async function remoteAccessPost(
 
   const payload = (await response.json()) as { remoteAccess?: unknown };
   return RemoteAccessSettingsSchema.parse(payload.remoteAccess);
+}
+
+async function watchNotificationsPost(
+  url: string,
+  token: string,
+  body?: WatchNotificationsUpdateRequest
+): Promise<WatchNotificationsSettings> {
+  const response = await adminFetch(url, token, {
+    method: 'POST',
+    ...(body ? { body: JSON.stringify(body) } : {})
+  });
+
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, 'Could not update watch notifications.'));
+  }
+
+  const payload = (await response.json()) as { watchNotifications?: unknown };
+  return WatchNotificationsSettingsSchema.parse(payload.watchNotifications);
 }
 
 export function adminFetch(url: string, token: string | undefined, init: RequestInit = {}): Promise<Response> {

@@ -1,0 +1,150 @@
+import Foundation
+
+final class AgentPulseClient {
+    private let session: AgentPulseSession
+    private let urlSession: URLSession
+    private let decoder = JSONDecoder()
+
+    init(session: AgentPulseSession, urlSession: URLSession = .shared) {
+        self.session = session
+        self.urlSession = urlSession
+    }
+
+    static func lookup(baseUrl: String, pin: String) async throws -> PairLookupResponse {
+        guard let encodedPin = pin.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "\(baseUrl.trimmedSlash())/pair/lookup/\(encodedPin)") else {
+            throw AgentPulseWatchError.invalidBaseUrl
+        }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(PairLookupResponse.self, from: data)
+    }
+
+    static func pair(baseUrl: String, pin: String, fingerprint: String) async throws -> PairResponse {
+        guard let url = URL(string: "\(baseUrl.trimmedSlash())/device/pair") else {
+            throw AgentPulseWatchError.invalidBaseUrl
+        }
+        let body: [String: String] = [
+            "pin": pin,
+            "deviceName": "Apple Watch",
+            "fingerprint": fingerprint
+        ]
+        let data = try await postJson(url: url, body: body)
+        return try JSONDecoder().decode(PairResponse.self, from: data)
+    }
+
+    func summary() async throws -> WatchSummaryResponse {
+        try await get("/watch/summary", as: WatchSummaryResponse.self)
+    }
+
+    func transcript(threadId: String) async throws -> ThreadTranscript {
+        guard let encoded = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            throw AgentPulseWatchError.server("Invalid thread id.")
+        }
+        return try await get("/threads/\(encoded)/transcript?view=watch", as: ThreadTranscript.self)
+    }
+
+    func sendReply(threadId: String, text: String) async throws {
+        guard let encoded = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            throw AgentPulseWatchError.server("Invalid thread id.")
+        }
+        _ = try await request(
+            path: "/threads/\(encoded)/messages",
+            method: "POST",
+            body: ThreadMessageRequest(text: text),
+            watchClient: true
+        )
+    }
+
+    func stop(threadId: String) async throws {
+        guard let encoded = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            throw AgentPulseWatchError.server("Invalid thread id.")
+        }
+        _ = try await request(path: "/threads/\(encoded)/stop", method: "POST", body: EmptyBody())
+    }
+
+    func openOnMac(threadId: String) async throws {
+        _ = try await request(
+            path: "/thread/open",
+            method: "POST",
+            body: ThreadOpenRequest(threadId: threadId, mode: "open")
+        )
+    }
+
+    func registerPushToken(_ token: String) async throws {
+        _ = try await request(
+            path: "/devices/watch-push",
+            method: "POST",
+            body: WatchPushRequest(
+                pushToken: token,
+                bundleId: "com.paulfecto.AgentPulse.watchkitapp",
+                environment: nil
+            )
+        )
+    }
+
+    func deletePushToken() async throws {
+        _ = try await request(path: "/devices/watch-push", method: "DELETE", body: EmptyBody())
+    }
+
+    private func get<Value: Decodable>(_ path: String, as type: Value.Type) async throws -> Value {
+        let data = try await request(path: path, method: "GET", body: Optional<EmptyBody>.none)
+        return try decoder.decode(type, from: data)
+    }
+
+    private func request<Body: Encodable>(
+        path: String,
+        method: String,
+        body: Body?,
+        watchClient: Bool = false
+    ) async throws -> Data {
+        guard let url = URL(string: "\(session.baseUrl.trimmedSlash())\(path)") else {
+            throw AgentPulseWatchError.invalidBaseUrl
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("Bearer \(session.token)", forHTTPHeaderField: "Authorization")
+        request.setValue(session.deviceId, forHTTPHeaderField: "X-Agent-Pulse-Device-Id")
+        request.setValue(session.fingerprint, forHTTPHeaderField: "X-Agent-Pulse-Fingerprint")
+        if watchClient {
+            request.setValue("watch", forHTTPHeaderField: "X-Agent-Pulse-Client")
+        }
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(body)
+        }
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.validate(response: response, data: data)
+        return data
+    }
+
+    private static func postJson<Body: Encodable>(url: URL, body: Body) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return data
+    }
+
+    private static func validate(response: URLResponse, data: Data) throws {
+        guard let http = response as? HTTPURLResponse else { return }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(ServerError.self, from: data).error) ?? "Agent Pulse returned \(http.statusCode)."
+            throw AgentPulseWatchError.server(message)
+        }
+    }
+}
+
+struct EmptyBody: Encodable {}
+
+private struct ServerError: Decodable {
+    let error: String
+}
+
+private extension String {
+    func trimmedSlash() -> String {
+        hasSuffix("/") ? String(dropLast()) : self
+    }
+}

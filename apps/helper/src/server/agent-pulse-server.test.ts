@@ -2,7 +2,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { CatalogModel, LiveEvent, Project, RemoteAccessSettings, Thread, ThreadTranscript } from '@agent-pulse/shared';
+import type {
+  CatalogModel,
+  LiveEvent,
+  Project,
+  RemoteAccessSettings,
+  Thread,
+  ThreadTranscript,
+  WatchNotificationsSettings
+} from '@agent-pulse/shared';
 import { WebSocket, type RawData } from 'ws';
 import { AdminAuth } from '../auth/admin';
 import { DeviceRegistry, MemoryDeviceStore, PairingManager } from '../auth/pairing';
@@ -516,6 +524,71 @@ describe('Agent Pulse helper API', () => {
     }
   });
 
+  it('stores watch APNs token metadata and excludes revoked devices from push targets', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const adminAuth = createAdminAuth();
+    await adminAuth.ensureInitialized();
+    const { token: adminToken } = adminAuth.issueToken();
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: false,
+      remoteAccess: remoteAccessSettings()
+    };
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore: { save: vi.fn(), load: vi.fn() } as unknown as HelperSettingsStore,
+      registry,
+      pairing,
+      adminAuth,
+      threadProvider: { listThreads: async () => [] },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      const register = await fetch(`${server.url}/devices/watch-push`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders(token, deviceId),
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          pushToken: 'watch-token-123456',
+          bundleId: 'com.paulfecto.AgentPulse.watchkitapp',
+          environment: 'sandbox'
+        })
+      });
+
+      expect(register.status).toBe(200);
+      await expect(register.json()).resolves.toEqual({ ok: true });
+      await expect(registry.listDevicesWithWatchPush()).resolves.toMatchObject([
+        {
+          deviceId,
+          watchPushToken: 'watch-token-123456',
+          watchPushBundleId: 'com.paulfecto.AgentPulse.watchkitapp',
+          watchPushEnvironment: 'sandbox',
+          watchPushTokenUpdatedAt: expect.any(String)
+        }
+      ]);
+
+      const revoked = await fetch(`${server.url}/settings/device/revoke`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ deviceId })
+      });
+      expect(revoked.status).toBe(200);
+      await expect(registry.listDevicesWithWatchPush()).resolves.toEqual([]);
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('deduplicates repeated project names and prefers normal workspace paths', async () => {
     const registry = new DeviceRegistry(new MemoryDeviceStore());
     const pairing = new PairingManager(registry);
@@ -728,6 +801,178 @@ describe('Agent Pulse helper API', () => {
         threads: threads.slice(0, 12),
         groups: [{ groupKey: workspacePath, total: 13, visible: 12 }]
       });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('returns a compact watch summary sorted by attention and recent work', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const threads: Thread[] = [
+      {
+        threadId: 'idle-new',
+        provider: 'codex',
+        title: 'Recent idle',
+        workspace: 'AgentPulse',
+        workspacePath: '/private/provider/path',
+        status: 'idle',
+        lastActivityAt: '2026-05-05T02:00:00Z',
+        lastTurnSummary: 'Done.'
+      },
+      {
+        threadId: 'waiting-old',
+        provider: 'codex',
+        title: 'Needs approval',
+        workspace: 'AgentPulse',
+        workspacePath: '/private/provider/path',
+        status: 'waiting_approval',
+        lastActivityAt: '2026-05-05T01:00:00Z',
+        lastTurnSummary: 'Approval required.'
+      },
+      {
+        threadId: 'running-mid',
+        provider: 'codex',
+        title: 'Still running',
+        workspace: 'AgentPulse',
+        workspacePath: '/private/provider/path',
+        status: 'running',
+        lastActivityAt: '2026-05-05T01:30:00Z',
+        lastTurnSummary: 'Working.'
+      }
+    ];
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: false,
+      remoteAccess: remoteAccessSettings({
+        enabled: true,
+        status: 'healthy',
+        publicUrl: 'https://agent-pulse.example.com',
+        hostname: 'agent-pulse.example.com'
+      })
+    };
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore: { save: vi.fn(), load: vi.fn() } as unknown as HelperSettingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: { listThreads: async () => threads },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      const response = await fetch(`${server.url}/watch/summary`, {
+        headers: authHeaders(token, deviceId)
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body).toMatchObject({
+        server: {
+          helperName: 'Agent Pulse',
+          version: '0.1.0',
+          remoteUrl: 'https://agent-pulse.example.com'
+        },
+        remoteAccess: {
+          enabled: true,
+          status: 'healthy',
+          publicUrl: 'https://agent-pulse.example.com',
+          hostname: 'agent-pulse.example.com'
+        }
+      });
+      expect(body.threads.map((thread: { threadId: string }) => thread.threadId)).toEqual([
+        'waiting-old',
+        'running-mid',
+        'idle-new'
+      ]);
+      expect(body.threads[0]).not.toHaveProperty('workspacePath');
+      expect(body.threads[0]).not.toHaveProperty('model');
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('delivers one watch push per relevant status transition', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const watchPushSender = vi.fn(async () => ({ ok: true, delivered: 1, failed: 0 }));
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: false,
+      remoteAccess: remoteAccessSettings(),
+      watchNotifications: watchNotificationsSettings({
+        enabled: true,
+        teamId: 'TEAM123456',
+        keyId: 'KEY1234567',
+        keyPath: '/tmp/AuthKey_KEY1234567.p8'
+      })
+    };
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore: { save: vi.fn(), load: vi.fn() } as unknown as HelperSettingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: { listThreads: async () => [] },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      watchPushSender,
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      await fetch(`${server.url}/devices/watch-push`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders(token, deviceId),
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          pushToken: 'watch-token-123456',
+          bundleId: 'com.paulfecto.AgentPulse.watchkitapp',
+          environment: 'sandbox'
+        })
+      });
+
+      server.hub.broadcast({ type: 'thread/status/changed', payload: { threadId: 'thread-1', status: 'running' } });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(watchPushSender).not.toHaveBeenCalled();
+
+      server.hub.broadcast({ type: 'thread/status/changed', payload: { threadId: 'thread-1', status: 'idle' } });
+      await vi.waitFor(() => expect(watchPushSender).toHaveBeenCalledTimes(1));
+      expect(watchPushSender).toHaveBeenLastCalledWith(expect.objectContaining({
+        notification: expect.objectContaining({
+          kind: 'finished',
+          threadId: 'thread-1',
+          serverName: 'Agent Pulse'
+        }),
+        targets: [expect.objectContaining({
+          token: 'watch-token-123456',
+          bundleId: 'com.paulfecto.AgentPulse.watchkitapp',
+          environment: 'sandbox'
+        })]
+      }));
+
+      server.hub.broadcast({ type: 'thread/status/changed', payload: { threadId: 'thread-1', status: 'idle' } });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(watchPushSender).toHaveBeenCalledTimes(1);
+
+      server.hub.broadcast({ type: 'thread/status/changed', payload: { threadId: 'thread-1', status: 'error' } });
+      await vi.waitFor(() => expect(watchPushSender).toHaveBeenCalledTimes(2));
+      expect(watchPushSender).toHaveBeenLastCalledWith(expect.objectContaining({
+        notification: expect.objectContaining({ kind: 'errored' })
+      }));
+
+      server.hub.broadcast({ type: 'thread/status/changed', payload: { threadId: 'thread-1', status: 'waiting_approval' } });
+      await vi.waitFor(() => expect(watchPushSender).toHaveBeenCalledTimes(3));
+      expect(watchPushSender).toHaveBeenLastCalledWith(expect.objectContaining({
+        notification: expect.objectContaining({ kind: 'attention' })
+      }));
     } finally {
       await server.stop();
     }
@@ -1036,6 +1281,89 @@ describe('Agent Pulse helper API', () => {
       expect(enableResponse.status).toBe(200);
       expect(remoteAccess.setEnabled).toHaveBeenCalledWith(true);
       expect(onLanModeChange).not.toHaveBeenCalled();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('updates and checks watch notification settings through admin routes', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const adminAuth = createAdminAuth();
+    await adminAuth.ensureInitialized();
+    const { token: adminToken } = adminAuth.issueToken();
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: false,
+      remoteAccess: remoteAccessSettings(),
+      watchNotifications: watchNotificationsSettings()
+    };
+    const settingsStore = {
+      save: vi.fn(),
+      load: vi.fn()
+    } as unknown as HelperSettingsStore;
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore,
+      registry,
+      pairing,
+      adminAuth,
+      threadProvider: { listThreads: async () => [] },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      version: '0.1.0'
+    });
+
+    try {
+      const updateResponse = await fetch(`${server.url}/settings/watch-notifications`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          enabled: true,
+          teamId: ' TEAM123456 ',
+          keyId: ' KEY1234567 ',
+          bundleId: ' com.paulfecto.AgentPulse.watchkitapp ',
+          environment: 'production',
+          keyPath: ' /tmp/missing-key.p8 '
+        })
+      });
+
+      expect(updateResponse.status).toBe(200);
+      await expect(updateResponse.json()).resolves.toMatchObject({
+        ok: true,
+        watchNotifications: {
+          enabled: true,
+          teamId: 'TEAM123456',
+          keyId: 'KEY1234567',
+          bundleId: 'com.paulfecto.AgentPulse.watchkitapp',
+          environment: 'production',
+          keyPath: '/tmp/missing-key.p8'
+        }
+      });
+      expect(settingsStore.save).toHaveBeenCalledWith(expect.objectContaining({
+        watchNotifications: expect.objectContaining({
+          teamId: 'TEAM123456',
+          environment: 'production'
+        })
+      }));
+
+      const checkResponse = await fetch(`${server.url}/settings/watch-notifications/check`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${adminToken}` }
+      });
+
+      expect(checkResponse.status).toBe(200);
+      await expect(checkResponse.json()).resolves.toMatchObject({
+        ok: false,
+        error: expect.stringContaining('Could not read APNs key file'),
+        watchNotifications: {
+          lastError: expect.stringContaining('Could not read APNs key file'),
+          lastCheckedAt: expect.any(String)
+        }
+      });
     } finally {
       await server.stop();
     }
@@ -2373,7 +2701,10 @@ describe('Agent Pulse helper API', () => {
 
       expect(settingsResponse.status).toBe(200);
       await expect(settingsResponse.json()).resolves.toEqual({
-        settings,
+        settings: {
+          ...settings,
+          watchNotifications: watchNotificationsSettings()
+        },
         devices: [
           {
             deviceId: existing.deviceId,
@@ -2571,6 +2902,54 @@ describe('Agent Pulse helper API', () => {
       expect(sendResponse.status).toBe(403);
       await expect(sendResponse.json()).resolves.toEqual({
         error: 'Mobile sending is off on the Mac.'
+      });
+      expect(appServer.sendMessage).not.toHaveBeenCalled();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('rejects watch client messages over 500 characters before reaching the provider', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const appServer = {
+      isConnected: () => true,
+      readTranscript: vi.fn(),
+      sendMessage: vi.fn()
+    };
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: true,
+      remoteAccess: remoteAccessSettings()
+    };
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore: { save: vi.fn(), load: vi.fn() } as unknown as HelperSettingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: { listThreads: async () => [] },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      appServer,
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      const sendResponse = await fetch(`${server.url}/threads/thread-1/messages`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders(token, deviceId),
+          'x-agent-pulse-client': 'watch',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ text: 'x'.repeat(501) })
+      });
+
+      expect(sendResponse.status).toBe(400);
+      await expect(sendResponse.json()).resolves.toEqual({
+        error: 'Watch messages must be 500 characters or fewer.'
       });
       expect(appServer.sendMessage).not.toHaveBeenCalled();
     } finally {
@@ -5894,6 +6273,22 @@ function remoteAccessSettings(overrides: Partial<RemoteAccessSettings> = {}): Re
       tunnelRunning: false,
       hostnameAssigned: false
     },
+    ...overrides
+  };
+}
+
+function watchNotificationsSettings(
+  overrides: Partial<WatchNotificationsSettings> = {}
+): WatchNotificationsSettings {
+  return {
+    enabled: false,
+    teamId: '',
+    keyId: '',
+    bundleId: 'com.paulfecto.AgentPulse.watchkitapp',
+    environment: 'sandbox',
+    keyPath: '',
+    lastError: '',
+    lastCheckedAt: null,
     ...overrides
   };
 }
