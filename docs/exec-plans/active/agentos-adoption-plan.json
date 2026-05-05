@@ -11,7 +11,7 @@
     "primary_lane": "codex",
     "repo_type": "fullstack-web"
   },
-  "generated_at": "2026-05-05T02:43:05Z",
+  "generated_at": "2026-05-05T04:45:39Z",
   "install": {
     "enabled_features": [
       "core",
@@ -21,7 +21,8 @@
       "secondary-lanes",
       "creative-workflow",
       "diagram-design",
-      "engineering-discipline"
+      "engineering-discipline",
+      "termination-supervisor"
     ],
     "profile": "frontier"
   },

@@ -11,7 +11,7 @@ has_deploy = true
 
 [install]
 profile = "frontier"
-enabled_features = ["core", "consultation", "browser-containerized", "frontier", "secondary-lanes", "creative-workflow", "diagram-design", "engineering-discipline", "termination-supervisor"]
+enabled_features = ["core", "consultation", "browser-containerized", "frontier", "secondary-lanes", "engineering-discipline", "creative-workflow", "diagram-design", "termination-supervisor"]
 
 [lane]
 mode = "orchestrated"
@@ -194,14 +194,20 @@ frontend_build = "pnpm --filter @agent-pulse/tablet build"
 frontend_build_proves = "The React/Vite tablet client compiles into the helper-served browser bundle."
 backend_boot = "pnpm --filter @agent-pulse/helper build"
 backend_boot_proves = "The macOS helper service, provider adapters, and static asset copy step bundle successfully."
-targeted_checks = [
-  { name = "vitest", command = "pnpm test", proves = "Shared schemas, helper provider adapters, auth, remote access, and tablet rendering behavior pass the repo test suite." },
-  { name = "typescript", command = "pnpm typecheck", proves = "The TypeScript monorepo typechecks across helper, tablet, and shared packages." },
-]
 runtime_smoke = "pnpm dev:run:local"
 runtime_smoke_proves = "A built helper can start locally, serve the tablet bundle, and expose /health/get; stop the long-running helper after the health response."
 health_url = ""
 health_url_proves = ""
+
+[[validation.targeted_checks]]
+name = "vitest"
+command = "pnpm test"
+proves = "Shared schemas, helper provider adapters, auth, remote access, and tablet rendering behavior pass the repo test suite."
+
+[[validation.targeted_checks]]
+name = "typescript"
+command = "pnpm typecheck"
+proves = "The TypeScript monorepo typechecks across helper, tablet, and shared packages."
 
 [tdd]
 required = true

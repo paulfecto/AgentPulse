@@ -16,7 +16,7 @@ Adopt the current AgentOS contract for this downstream repo before harness-manag
 
 ## Planned Install Selection
 - profile: `frontier`
-- enabled features: `core, consultation, browser-containerized, frontier, secondary-lanes, creative-workflow, diagram-design, engineering-discipline`
+- enabled features: `core, consultation, browser-containerized, frontier, secondary-lanes, creative-workflow, diagram-design, engineering-discipline, termination-supervisor`
 
 ## Recommendations
 - Keep AgentOS setup plan-first: answer project-specific questions before mutation.
