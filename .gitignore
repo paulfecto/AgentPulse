@@ -40,3 +40,6 @@ Watch app/
 
 /.playwright-mcp/
 /.cloudflared/
+
+# AgentOS/Codex local runtime state
+.codex/.codex-home/

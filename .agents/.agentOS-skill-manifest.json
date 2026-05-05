@@ -1,0 +1,12 @@
+{
+  "harness-clarifier": "1e90fc6e8c51c51b5e1917595ffab339974919f7072d86bbd2fca39685fb47ab",
+  "harness-diagnose": "fe456e589ac768d9f6c11a3fd4a42accd9aa4fd70bdadafe9aac57e393bc5214",
+  "harness-diagram-designer": "3a541cce1b2b6142fc90eae0f299f176d8cb56dafe4a3fe45d2c3bab8c8f63d7",
+  "harness-domain-language": "2cc82936a7a7d4c06227fdd3fcdff3a44c4552e275d516f8e966be8727e72c37",
+  "harness-executor": "0db790032f1ab201cdbbf72a2d70211f181575823194653f14e77056012a8563",
+  "harness-handoff": "dfdadafd0bb37cdc0ba966c8fe25cf892a23f961a7d4dbccb12cf5b5fbb0c04a",
+  "harness-mcp-auditor": "c9f6a5d783f09418d1c0d3d24fa878776c3e7a723e0edc19545fa429591a1c9c",
+  "harness-planner": "935bd84ea2ec1fde7ce17da6afd4e6433d622d62a0492a089d6587ebf05cc6b7",
+  "harness-reviewer": "2df36ab200199d6ff236fada217d0514d8e607ff7ca9f5c6aa73d424a718162d",
+  "harness-runtime-verifier": "21cfa946eff43b7e581cffff290db1092a41a0859a206c4baf43e36849fb1a56"
+}

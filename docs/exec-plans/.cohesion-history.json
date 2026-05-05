@@ -1,0 +1,172 @@
+[
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "0e8401a4f379f089e192c71c1966cd3b339be71bae112e6a2833050dd315477e",
+    "content_simhash": "1d56413e12ebb893",
+    "disposition": "deferred-split",
+    "file": "apps/helper/src/claude/claude-code.test.ts",
+    "line_count": 815,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "6ae94d6979f8421f69fcf4080c535cabcfbb7cda753b563ad5582ac25cc664bd",
+    "content_simhash": "3716c43448dff035",
+    "disposition": "deferred-split",
+    "file": "apps/helper/src/claude/claude-code.ts",
+    "line_count": 1834,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "8699f5a8e0746263bde74a78b796a94f4da250b7117ac919c5a41637bafa1e53",
+    "content_simhash": "37726c14cdcebbb7",
+    "disposition": "deferred-split",
+    "file": "apps/helper/src/codex/app-server-chat.test.ts",
+    "line_count": 1437,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "40181ca43fc6d266666db8c52b07cff0941f8d940e992b1eb2ec593617daff5b",
+    "content_simhash": "3336e5344adfb27e",
+    "disposition": "deferred-split",
+    "file": "apps/helper/src/codex/app-server-chat.ts",
+    "line_count": 2257,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "8bd3845c584a3ee15a826b4cad95f4f8994dd439b41b7838009de0ab7287c0f5",
+    "content_simhash": "192c653e427aa396",
+    "disposition": "deferred-split",
+    "file": "apps/helper/src/codex/codex-mirror.test.ts",
+    "line_count": 1393,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "0538cc2d74d913d3d3a45ce011539a10a14bfd10e871829a418f845dc427b916",
+    "content_simhash": "7312ed144a5ff27d",
+    "disposition": "deferred-split",
+    "file": "apps/helper/src/codex/codex-mirror.ts",
+    "line_count": 1767,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "76615a6637499f4f4a50efe3392295df8e3835416c52ccf717cd761198617b92",
+    "content_simhash": "7306655e406332f5",
+    "disposition": "deferred-split",
+    "file": "apps/helper/src/codex/thread-reader.ts",
+    "line_count": 778,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "5d57a3db2b538ae79c2926dc8cf01900764735a425ac0cdec06724213745e94a",
+    "content_simhash": "3716e5544a9ff077",
+    "disposition": "deferred-split",
+    "file": "apps/helper/src/copilot/copilot.ts",
+    "line_count": 1510,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "637d4de7811976aef55e5cd4d49c361d353eebf314c5514e067817564a3b6efe",
+    "content_simhash": "37fef536404bb997",
+    "disposition": "deferred-split",
+    "file": "apps/helper/src/server/agent-pulse-server.test.ts",
+    "line_count": 5899,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "6f2c037b95fd26fbcde3d24228d605d302b6beaf21c640d671a0c36ebaa53761",
+    "content_simhash": "3356fd374c4ab0f7",
+    "disposition": "deferred-split",
+    "file": "apps/helper/src/server/agent-pulse-server.ts",
+    "line_count": 5582,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "9dcfb69104605e8d35620547099ef40beb2095cfe920b1feeabdcedb96a64df2",
+    "content_simhash": "25e6e13ecad6be77",
+    "disposition": "deferred-split",
+    "file": "apps/tablet/src/App.test.tsx",
+    "line_count": 7286,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "43e9fc25306972a4d52e20eb27f26fe0d84182a6d0424d49b7dfbee85947dc75",
+    "content_simhash": "7716651648efa0f3",
+    "disposition": "deferred-split",
+    "file": "apps/tablet/src/App.tsx",
+    "line_count": 4304,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "241a9dad5741dc3f1d03f1986c5bcf55232c3df179be7cb8b2a364762de2c15d",
+    "content_simhash": "5790cd5c81ceb237",
+    "disposition": "deferred-split",
+    "file": "apps/tablet/src/Dashboard.tsx",
+    "line_count": 1307,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "625211afbb5d3e8bed396233ec7b23afb4e229eeac1375243bca1ae6f0ea7f3c",
+    "content_simhash": "67d06c4a4976b7b7",
+    "disposition": "deferred-split",
+    "file": "apps/tablet/src/Sidebar.tsx",
+    "line_count": 797,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "923ead9c7e9183e62cf93946f2f66946ce996972a1b7e6407b60fd81ce8813fc",
+    "content_simhash": "57d6ed1e4963b0b3",
+    "disposition": "deferred-split",
+    "file": "apps/tablet/src/ThreadView.tsx",
+    "line_count": 4362,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "a54b5bf99fc43d1f6190a1426c3fc817df0bb08096a8655f072d84f813404b1d",
+    "content_simhash": "3b5ef35a2adbb2f3",
+    "disposition": "deferred-split",
+    "file": "apps/tablet/src/api.ts",
+    "line_count": 940,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "3ea4387d0f24d53f71d95c72333406b593d949fd7b1175688535a300ab57e8d0",
+    "content_simhash": "594ec59ae4993123",
+    "disposition": "deferred-split",
+    "file": "packages/shared/src/index.ts",
+    "line_count": 901,
+    "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
+    "reason_code": "deferred-decomposition"
+  }
+]

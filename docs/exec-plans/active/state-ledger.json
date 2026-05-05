@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0.0",
+  "task_id": "agentos-downstream-adoption",
+  "plan_ref": "docs/exec-plans/active/agentos-downstream-adoption.md",
+  "owner_lane": "codex",
+  "status": "in-progress",
+  "latest_routing_decision_ref": "",
+  "open_blocker_ref": "",
+  "proof_queue": [],
+  "consultation_status": {
+    "state": "pending",
+    "latest_artifact": "",
+    "summary": ""
+  },
+  "resume_cursor": {
+    "status": "in-progress",
+    "latest_heartbeat_at": "2026-05-05T03:30:13Z",
+    "continuation_hint": ""
+  },
+  "termination_supervisor_status": {
+    "enabled": true,
+    "effective_mode": "completion-gate",
+    "turns_used": 0,
+    "max_auto_turns": 6,
+    "awaiting_resume": false,
+    "last_stop_decision_ref": "",
+    "last_completion_gate_ref": "",
+    "last_resume_envelope_ref": "",
+    "consecutive_no_progress_turns": 0,
+    "last_failing_command": ""
+  },
+  "last_updated_at": "2026-05-05T03:30:33Z"
+}

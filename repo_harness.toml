@@ -1,0 +1,242 @@
+harness_version = "4.8.0"
+global_harness_root = "../agentOS-upstream-main"
+global_harness_ref = "11274a64f909ea1ee0a3c92455b4d291ba8ea344"
+global_harness_manifest_sha256 = "0d862a119bbdfe969b40e43a1eb7f4f4c1edb09c028362f43d72d8794e0a9436"
+global_harness_repo = "https://github.com/Dope-AI-KR/agentOS"
+repo_type = "fullstack-web"
+production_sensitive = true
+has_mcp = false
+has_realtime = true
+has_deploy = true
+
+[install]
+profile = "frontier"
+enabled_features = ["core", "consultation", "browser-containerized", "frontier", "secondary-lanes", "creative-workflow", "diagram-design", "engineering-discipline", "termination-supervisor"]
+
+[lane]
+mode = "orchestrated"
+primary = "codex"
+enabled = ["codex"]
+role_routing = []
+
+[autonomy]
+policy = "run-until-resolved"
+stop_only_on = ["missing-secret", "missing-external-service-access", "unavailable-runtime", "manual-physical-verification", "hard-tool-outage"]
+allow_infinite_local_iteration = true
+require_blocker_artifact_on_stop = true
+
+[orchestrator]
+enabled = true
+lease_seconds = 900
+heartbeat_seconds = 60
+max_stale_heartbeat_seconds = 180
+resume_policy = "required"
+wakeup_coalescing = true
+ownership_conflict_policy = "409-conflict"
+default_budget_policy = "task-class-derived"
+external_consultants_allowed = ["claude", "gemini"]
+task_claim_path = "docs/exec-plans/active/task-claim.json"
+heartbeat_log_path = "docs/exec-plans/active/heartbeat.jsonl"
+blocker_path = "docs/exec-plans/active/blocker.json"
+resume_state_path = "docs/exec-plans/active/resume-state.json"
+
+[parallelism]
+strategy = "maximum-safe-parallel"
+worker_cap_policy = "auto"
+primary_acceptance = "primary-only"
+require_isolated_sidecars = true
+duplicate_work_policy = "coalesce-readonly-only"
+shared_fixture_policy = "forbid-unless-namespaced"
+external_consultants_allowed = ["claude", "gemini"]
+
+[browser_automation]
+mode = "containerized"
+runtime = "docker"
+framework = "playwright"
+host_browser_fallback = "forbidden"
+override_policy = "explicit-artifact-only"
+wrapper_path = "scripts/harness/run_browser_automation.sh"
+artifact_dir = ".playwright-cli"
+override_artifact = "docs/exec-plans/active/browser-automation-override.json"
+max_parallel_containers = 2
+
+[capability_control]
+enabled = true
+default_policy = "ask"
+decision_artifact = "docs/exec-plans/active/capability-decisions.json"
+override_artifact = "docs/exec-plans/active/capability-overrides.json"
+browser_origin_allowlist = ["http://localhost:*", "https://localhost:*", "http://127.0.0.1:*"]
+
+[[capability_control.policies]]
+capability_id = "repo-write"
+policy = "allow"
+
+[[capability_control.policies]]
+capability_id = "git-mutation"
+policy = "ask"
+
+[[capability_control.policies]]
+capability_id = "browser-external"
+policy = "ask"
+
+[[capability_control.policies]]
+capability_id = "mcp-write"
+policy = "ask"
+
+[[capability_control.policies]]
+capability_id = "deploy-mutation"
+policy = "deny"
+
+[[capability_control.policies]]
+capability_id = "secret-materialization"
+policy = "deny"
+
+[[capability_control.policies]]
+capability_id = "external-resume"
+policy = "deny"
+
+[termination_supervisor]
+enabled = true
+default_mode = "completion-gate"
+allowed_modes = ["completion-gate", "await-resume", "bounded-continue", "continuous-until-blocker"]
+max_auto_turns = 6
+feedback_tail_lines = 40
+completion_gate_sources = ["validation.targeted_checks", "tdd.test_command"]
+state_artifact = "docs/exec-plans/active/supervisor-state.json"
+decision_artifact = "docs/exec-plans/active/stop-decision.json"
+gate_result_artifact = "docs/exec-plans/active/completion-gate-result.json"
+suspend_artifact = "docs/exec-plans/active/suspend-state.json"
+
+[creative_workflow]
+enabled = true
+writing_task_class = "writing"
+writing_lane = "claude"
+writing_review_lane = "claude"
+user_facing_locales = ["en", "ko"]
+locale_scope = "user-facing-copy"
+image_task_class = "image-generation"
+video_task_class = "video-generation"
+media_lane = "gemini"
+preferred_media_model_track = "nano-banana-latest"
+user_facing_copy_roots = []
+
+[diagram_design]
+enabled = true
+task_class = "diagram-generation"
+lane = "claude"
+style = "diagram-design"
+output_root = "docs/diagrams"
+style_guide_path = "docs/diagrams/diagram-style-guide.md"
+preferred_for = ["architecture", "organization", "process", "system-map", "responsibility-map", "roadmap", "product-explanation"]
+allowed_source_truth_formats = ["mermaid", "d2", "plantuml", "generated-graph"]
+reference_repo = "https://github.com/cathrynlavery/diagram-design"
+reference_ref = "30764f2b1ca950b73fd14f69ff44752abdd19b5a"
+vendor_mode = "external-reference"
+
+[engineering_discipline]
+enabled = true
+domain_context_path = "CONTEXT.md"
+adr_dir = "docs/adr"
+clarification_mode = "bounded-interactive"
+debugging_mode = "feedback-loop-first"
+tdd_slice_mode = "vertical"
+doc_update_policy = "exec-plan-bounded"
+reference_repo = "https://github.com/mattpocock/skills"
+reference_ref = "b843cb5ea74b1fe5e58a0fc23cddef9e66076fb8"
+vendor_mode = "pattern-extraction"
+
+[consultation]
+policy = "best-effort"
+preferred_reviewers = ["claude", "gemini"]
+attempt_on = ["global-harness-change", "breaking-contract-change", "routing-policy-change", "release-law-change", "browser-automation-law-change", "termination-supervisor-law-change", "external-resume-law-change", "copy-change", "localization-change", "content-structure-change", "image-generation", "presentation-generation", "product-media-wave", "public-facing-ui-wave"]
+required_for_non_trivial = true
+claude_required_on = ["copy-change", "localization-change", "content-structure-change", "presentation-generation", "product-media-wave", "public-facing-ui-wave"]
+gemini_required_on = ["image-generation", "presentation-generation", "product-media-wave", "public-facing-ui-wave"]
+artifact_required = true
+consensus_mode = false
+artifacts_dir = "docs/exec-plans/active/consultation-attempts"
+
+[rollout]
+mode = "maximum-safe-parallel"
+candidate_tree_policy = "exact-tree"
+certification_root_policy = "fresh-full-root"
+production_mutation_policy = "final-deploy-only"
+beta_mutation_policy = "disposable-isolated"
+shadow_check_policy = "readonly-only"
+artifacts_dir = "docs/exec-plans/active/release-certification"
+release_rehearsal_policy = "none"
+cleanup_policy = "best-effort"
+release_rehearsal_summary_path = ""
+cleanup_summary_path = ""
+
+[runtime]
+backend = "native"
+omx_package = "oh-my-codex"
+omx_version = "0.11.13"
+omx_setup_scope = "user"
+omx_home = ".omx-home"
+omx_launch_flags = ["--madmax", "--high"]
+
+[paths]
+exec_plans = "docs/exec-plans"
+progress_ledger_html = "docs/exec-plans/active/HARNESS_PROGRESS_LEDGER.html"
+state_ledger_json = "docs/exec-plans/active/state-ledger.json"
+working_context_md = "docs/exec-plans/active/WORKING_CONTEXT.md"
+session_start_md = "docs/exec-plans/active/SESSION_START.md"
+mcp_contract = "docs/MCP_CONTRACT.md"
+agents_file = "AGENTS.md"
+harness_guide = "docs/HARNESS_GUIDE.md"
+codex_config = ".codex/config.toml"
+skills_root = ".agents/skills"
+
+[validation]
+frontend_build = "pnpm --filter @agent-pulse/tablet build"
+frontend_build_proves = "The React/Vite tablet client compiles into the helper-served browser bundle."
+backend_boot = "pnpm --filter @agent-pulse/helper build"
+backend_boot_proves = "The macOS helper service, provider adapters, and static asset copy step bundle successfully."
+targeted_checks = [
+  { name = "vitest", command = "pnpm test", proves = "Shared schemas, helper provider adapters, auth, remote access, and tablet rendering behavior pass the repo test suite." },
+  { name = "typescript", command = "pnpm typecheck", proves = "The TypeScript monorepo typechecks across helper, tablet, and shared packages." },
+]
+runtime_smoke = "pnpm dev:run:local"
+runtime_smoke_proves = "A built helper can start locally, serve the tablet bundle, and expose /health/get; stop the long-running helper after the health response."
+health_url = ""
+health_url_proves = ""
+
+[tdd]
+required = true
+mode = "contract-first"
+test_command = "pnpm test"
+test_command_proves = "Vitest exercises the behavioral contract for helper APIs, provider adapters, shared schemas, and tablet UI flows."
+red_signal_regex = "FAIL|failed|AssertionError|Error"
+red_signal_proves = "A failing Vitest assertion or thrown error marks the intended contract seam before implementation."
+fixture_strategy = "Use Vitest temp directories, in-memory stores, mocked provider transports, and jsdom browser APIs instead of live provider state."
+refactor_guard = "Run pnpm typecheck and pnpm build after the targeted green test when a change touches shared contracts, bundling, or user-visible flows."
+
+[mcp]
+guide_url = ""
+surfaces = []
+
+[architecture]
+single_source_of_truth = true
+projection_surfaces = ["apps/tablet browser UI", "README.md product overview", "docs requirement notes", "extension manifest"]
+
+[delegation]
+snapshot_excludes = [".git/", ".env", ".env.*", ".aws/", ".ssh/", "*.pem", "*.key", "id_rsa", "id_ed25519", ".codex-home/", ".gemini-home/", ".bkit/", ".playwright-cli/", "output/", "node_modules/", ".venv/", "venv/", "dist/", "build/", "coverage/", ".pytest_cache/", ".mypy_cache/", ".next/", ".nuxt/", ".turbo/", "target/", ".gradle/", "tmp/", "temp/"]
+
+[frontier]
+enabled = true
+orchestrator_lane = "codex"
+task_taxonomy = "../agentOS-upstream-main/config/task_taxonomy.json"
+capability_registry = "../agentOS-upstream-main/config/lane_capability_registry.json"
+routing_policy = "../agentOS-upstream-main/config/routing_policy.json"
+routing_decisions_dir = "docs/exec-plans/active/routing-decisions"
+worker_reports_dir = "docs/exec-plans/active/worker-reports"
+capability_scorecards_dir = "docs/exec-plans/scorecards"
+routing_policy_proposals_dir = "docs/exec-plans/scorecard-proposals"
+team_ledger_html = "docs/exec-plans/active/TEAM_PROGRESS_LEDGER.html"
+improvement_mode = "live-orchestrated"
+
+[ci]
+harness_validation_mode = "local-only"
+visible_workflows = []

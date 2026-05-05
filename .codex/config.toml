@@ -1,0 +1,121 @@
+#:schema https://developers.openai.com/codex/config-schema.json
+
+# Project-scoped Codex configuration for this repository.
+# 이 저장소 전용 Codex 설정입니다.
+#
+# Keep this file repo-safe and generic.
+# 이 파일은 저장소 안전 범위와 일반 규칙만 담고,
+# machine-specific 또는 user-specific override는 `.codex.local.toml`에 둡니다.
+#
+# Typical uses / 일반적인 용도:
+# - repo-safe Codex defaults / 저장소 공용 Codex 기본값
+# - automatic harness request routing / 자동 하니스 요청 라우팅
+# - shared harness skill enablement / 공용 하니스 스킬 활성화
+# - bounded Codex history and transient artifact retention / 제한된 Codex history와
+#   임시 산출물 보존 정책
+#
+# Add settings only when they should apply to everyone working in this repo.
+# 이 저장소에서 일하는 모든 사람에게 적용되어야 할 때만 설정을 추가합니다.
+#
+# Launch with `bash scripts/codex/run_repo_codex.sh` so the shared cleanup path
+# stays active, and use `bash scripts/codex/clean_repo_artifacts.sh` when you
+# need to prune disposable artifacts explicitly.
+
+profile = "harness-default"
+personality = "pragmatic"
+project_root_markers = ["repo_harness.toml", "AGENTS.md"]
+web_search = "cached"
+log_dir = ".codex-home/log"
+sqlite_home = ".codex-home/sqlite"
+developer_instructions = '''
+[agentOS managed router]
+agentOS automatic request router
+
+Treat every normal repo request as a harness-managed request by default.
+
+Goal:
+- Resolve the request end to end through the repo's AgentOS adapter.
+
+Success criteria:
+- Use the smallest relevant context from AGENTS.md, repo_harness.toml, the harness guide, lane-local config, and the active execution plan.
+- Use `.agents/skills/harness-executor` as the default intake path for non-trivial implementation, debugging, refactoring, review, or research work.
+- Keep Codex as the default lane unless `repo_harness.toml [lane]` routes a specific role elsewhere.
+- When `[diagram_design]` is enabled, treat internal explanatory diagrams as `diagram-generation` work routed to Claude; keep source-of-truth diagrams in Mermaid, D2, PlantUML, or generated graph formats.
+- When `[engineering_discipline]` is enabled, use the optional shared skills for bounded clarification, feedback-loop-first diagnosis, shared domain language, and vertical TDD slices.
+- For complex, risky, ambiguous, or non-trivial work, keep a real active execution plan current.
+
+Constraints:
+- Read `repo_harness.toml [tdd]` before changing enforceable behavior.
+- For harness install/update setup, use the adoption plan first; do not mutate
+  adapter setup without `--accept-adoption-plan`.
+- Use external lanes only for roles declared in `lane.role_routing`.
+- Launch through `scripts/codex/run_repo_codex.sh` when the repo-scoped launcher exists.
+- Treat screenshots, Playwright captures, delegated run outputs, and transient logs as disposable unless retained by `retain-artifact:` in the active execution plan.
+
+Evidence required:
+- Before claiming complete, run validation, review the work, and record validation evidence, TDD evidence when behavior changes, and review evidence in the active execution plan.
+- Before final handoff, run `scripts/codex/clean_repo_artifacts.sh` or otherwise remove disposable artifacts from `.playwright-cli/`, `output/bkit/`, and other harness-managed transient paths.
+[/agentOS managed router]
+'''
+
+[history]
+persistence = "none"
+max_bytes = 10485760
+
+[profiles]
+
+[profiles.harness-default]
+model = "gpt-5.4"
+review_model = "gpt-5.4"
+model_reasoning_effort = "high"
+plan_mode_reasoning_effort = "xhigh"
+service_tier = "fast"
+
+[profiles.harness-research]
+model = "gpt-5.4"
+review_model = "gpt-5.4"
+model_reasoning_effort = "xhigh"
+plan_mode_reasoning_effort = "xhigh"
+web_search = "live"
+
+[skills]
+
+[[skills.config]]
+path = ".agents/skills/harness-executor"
+enabled = true
+
+[[skills.config]]
+path = ".agents/skills/harness-planner"
+enabled = true
+
+[[skills.config]]
+path = ".agents/skills/harness-reviewer"
+enabled = true
+
+[[skills.config]]
+path = ".agents/skills/harness-runtime-verifier"
+enabled = true
+
+[[skills.config]]
+path = ".agents/skills/harness-mcp-auditor"
+enabled = true
+
+[[skills.config]]
+path = ".agents/skills/harness-handoff"
+enabled = true
+
+[[skills.config]]
+path = ".agents/skills/harness-diagram-designer"
+enabled = true
+
+[[skills.config]]
+path = ".agents/skills/harness-clarifier"
+enabled = true
+
+[[skills.config]]
+path = ".agents/skills/harness-diagnose"
+enabled = true
+
+[[skills.config]]
+path = ".agents/skills/harness-domain-language"
+enabled = true

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="agentos-ledger-template-version" content="3">
+  <meta name="agentos-ledger-fingerprint" content="d08b03f5dc25999caed1d95a6a1bf7af34fc8d0507039613b966e1a28a7c2fbe">
+  <title>AgentOS Progress Ledger</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #1f2937;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --line: #334155;
+      --planned: #64748b;
+      --executing: #0ea5e9;
+      --validating: #f59e0b;
+      --complete: #22c55e;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    main { max-width: 1200px; margin: 0 auto; padding: 32px 20px 48px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .meta { color: var(--muted); margin-bottom: 24px; }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .summary-card, .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+    .summary-card strong { display: block; font-size: 24px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    .card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .card h2 { margin: 0; font-size: 18px; }
+    .target { color: var(--muted); min-height: 42px; }
+    .badge { border-radius: 999px; padding: 4px 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    .stage-planned { background: rgba(100,116,139,.18); color: #cbd5e1; }
+    .stage-executing { background: rgba(14,165,233,.18); color: #bae6fd; }
+    .stage-validating { background: rgba(245,158,11,.18); color: #fde68a; }
+    .stage-complete { background: rgba(34,197,94,.18); color: #bbf7d0; }
+    .meter { height: 10px; border-radius: 999px; background: var(--panel-2); overflow: hidden; margin: 12px 0 16px; }
+    .meter span { display: block; height: 100%; background: linear-gradient(90deg, var(--executing), var(--complete)); }
+    dl { display: grid; gap: 8px; margin: 0; }
+    dt { color: var(--muted); font-weight: 600; }
+    dd { margin: 0; }
+    .empty { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>AgentOS Progress Ledger</h1>
+    <p class="meta">Generated at 2026-05-05T03:30:32Z from the active execution plans. This ledger is an operator-visible projection of current plan state, validation evidence, TDD evidence, and review evidence. It is not a cryptographically signed audit record and does not replace the underlying execution plans.</p>
+    <section class="summary">
+      <div class="summary-card"><span>Active plans</span><strong>1</strong></div>
+      <div class="summary-card"><span>Completed plans</span><strong>0</strong></div>
+      <div class="summary-card"><span>In flight</span><strong>1</strong></div>
+    </section>
+    <section class="cards">
+
+      <article class="card">
+        <header>
+          <h2>agentos-downstream-adoption.md</h2>
+          <span class="badge stage-validating">validating</span>
+        </header>
+        <p class="target">AgentPulse has a checked-in AgentOS adapter that points to `dope-ai-kr/agentOS` at `11274a64f909ea1ee0a3c92455b4d291ba8ea344`. Future repo work enters through the Codex-primary...</p>
+        <div class="meter"><span style="width:85%"></span></div>
+        <dl>
+          <div><dt>Layer</dt><dd>Owner: `codex` Layer: repo harness adapter and documentation surfaces. Product runtime ownership remains in `apps/helper`, `apps/tablet`, and `packages/shared`.</dd></div>
+          <div><dt>State</dt><dd>validation-complete for downstream adoption.</dd></div>
+          <div><dt>Ready</dt><dd>yes for the AgentOS adapter adoption; app behavior is unchanged and Docker test/type/build gates passed.</dd></div>
+          <div><dt>Write set</dt><dd>`AGENTS.md`, `HARNESS_VERSION`, `repo_harness.toml`, `CONTEXT.md` `.gitignore` `docs/HARNESS_CHECKLIST.md`, `docs/HARNESS_GUIDE.md`, `docs/MCP_CONTRACT.md`, `docs/adr/` `docs/ex...</dd></div>
+          <div><dt>Validation</dt><dd>commands run: `bash ../agentOS-upstream-main/scripts/harness/install.sh --repo &quot;$PWD&quot; --accept-adoption-plan` succeeded; Docker AgentOS gate passed with `verify_harness.py`, `ve...</dd></div>
+          <div><dt>TDD</dt><dd>red signal: not required for this adapter-only adoption. red artifact: not recorded because no product behavior contract was changed. green result: Docker `pnpm test` passed 33...</dd></div>
+          <div><dt>Review</dt><dd>reviewer: `codex` review artifact: `docs/exec-plans/active/agentos-downstream-adoption.md` unresolved findings: no product-source changes; local package manager remains unavaila...</dd></div>
+        </dl>
+      </article>
+    </section>
+  </main>
+</body>
+</html>
