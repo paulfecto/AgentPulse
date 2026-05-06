@@ -1184,16 +1184,136 @@ describe('Agent Pulse tablet UI', () => {
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Remote access' })).toBeInTheDocument();
     expect(screen.getByText('Install cloudflared first.')).toBeInTheDocument();
-    expect(screen.getByText('No domain needed. Agent Pulse will ask Cloudflare for a temporary public URL.')).toBeInTheDocument();
+    expect(screen.getByText('Use a Cloudflare Tunnel. Stable hostname mode is required for Apple Watch access away from this network.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tunnel mode')).toHaveValue('quick');
     expect(screen.getByLabelText('Tunnel protocol')).toHaveValue('auto');
     expect(screen.getByTitle(/Auto lets Cloudflare choose/)).toBeInTheDocument();
     expect(screen.queryByLabelText('Cloudflare hostname')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Configure tunnel' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Check setup' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Turn on remote access' })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Tunnel protocol'), { target: { value: 'http2' } });
     await waitFor(() =>
       expect(screen.getByLabelText('Tunnel protocol')).toHaveValue('http2')
+    );
+  });
+
+  it('configures stable Cloudflare hostname mode in admin settings', async () => {
+    sessionStorage.setItem('agent-pulse-admin-token', 'admin-token');
+    window.location.hash = '#/settings';
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/health/get') {
+        return {
+          ok: true,
+          json: async () => ({
+            status: 'ok',
+            codexAppServer: 'connected',
+            version: '0.1.0',
+            uptimeSec: 60
+          })
+        };
+      }
+
+      if (url === '/settings/get') {
+        return {
+          ok: true,
+          json: async () => ({
+            settings: {
+              lanEnabled: false,
+              mobileSendEnabled: false,
+              remoteAccess: {
+                enabled: false,
+                provider: 'cloudflare',
+                mode: 'named',
+                tunnelProtocol: 'auto',
+                hostname: 'pulse.example.com',
+                publicUrl: 'https://pulse.example.com',
+                tunnelName: 'agent-pulse',
+                tunnelId: '',
+                configPath: '/tmp/config.yml',
+                metricsUrl: 'http://127.0.0.1:60123/metrics',
+                status: 'disconnected',
+                lastError: '',
+                lastStartedAt: null,
+                lastStoppedAt: null,
+                lastCheckedAt: '2026-04-26T10:00:00Z',
+                checklist: {
+                  dependencyInstalled: true,
+                  authenticated: false,
+                  configured: true,
+                  tunnelRunning: false,
+                  hostnameAssigned: true
+                }
+              }
+            },
+            devices: [],
+            pairingPins: []
+          })
+        };
+      }
+
+      if (url === '/settings/remote-access/cloudflare/configure') {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          mode: 'named',
+          hostname: 'pulse.watch.example.com',
+          tunnelName: 'agent-pulse-watch'
+        });
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            remoteAccess: {
+              enabled: false,
+              provider: 'cloudflare',
+              mode: 'named',
+              tunnelProtocol: 'auto',
+              hostname: 'pulse.watch.example.com',
+              publicUrl: 'https://pulse.watch.example.com',
+              tunnelName: 'agent-pulse-watch',
+              tunnelId: '',
+              configPath: '/tmp/config.yml',
+              metricsUrl: 'http://127.0.0.1:60123/metrics',
+              status: 'disconnected',
+              lastError: '',
+              lastStartedAt: null,
+              lastStoppedAt: null,
+              lastCheckedAt: '2026-04-26T10:00:00Z',
+              checklist: {
+                dependencyInstalled: true,
+                authenticated: false,
+                configured: true,
+                tunnelRunning: false,
+                hostnameAssigned: true
+              }
+            }
+          })
+        };
+      }
+
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Remote access' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Tunnel mode')).toHaveValue('named');
+    expect(screen.getByLabelText('Cloudflare hostname')).toHaveValue('pulse.example.com');
+    expect(screen.getAllByText('Cloudflare login').length).toBeGreaterThan(0);
+    expect(screen.getByText('Stable Watch URL')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Cloudflare hostname'), {
+      target: { value: 'pulse.watch.example.com' }
+    });
+    fireEvent.change(screen.getByLabelText('Tunnel name'), {
+      target: { value: 'agent-pulse-watch' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Configure tunnel' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('https://pulse.watch.example.com')).toBeInTheDocument()
     );
   });
 

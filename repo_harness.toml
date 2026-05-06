@@ -1,7 +1,7 @@
-harness_version = "4.8.0"
-global_harness_root = "../agentOS-upstream-main"
-global_harness_ref = "11274a64f909ea1ee0a3c92455b4d291ba8ea344"
-global_harness_manifest_sha256 = "0d862a119bbdfe969b40e43a1eb7f4f4c1edb09c028362f43d72d8794e0a9436"
+harness_version = "4.12.2"
+global_harness_root = "../agentOS"
+global_harness_ref = "52c63f1d47abc8c8f24605b1f01a05fd16a45019"
+global_harness_manifest_sha256 = "f7a5e79dc48fff224edba7291bcacfe5d6963b17a49b3746b12fedba5f9ac73e"
 global_harness_repo = "https://github.com/Dope-AI-KR/agentOS"
 repo_type = "fullstack-web"
 production_sensitive = true
@@ -11,7 +11,7 @@ has_deploy = true
 
 [install]
 profile = "frontier"
-enabled_features = ["core", "consultation", "browser-containerized", "frontier", "secondary-lanes", "engineering-discipline", "creative-workflow", "diagram-design", "termination-supervisor"]
+enabled_features = ["core", "consultation", "browser-containerized", "frontier", "secondary-lanes", "termination-supervisor", "creative-workflow", "diagram-design", "engineering-discipline", "ui-reference"]
 
 [lane]
 mode = "orchestrated"
@@ -107,44 +107,6 @@ decision_artifact = "docs/exec-plans/active/stop-decision.json"
 gate_result_artifact = "docs/exec-plans/active/completion-gate-result.json"
 suspend_artifact = "docs/exec-plans/active/suspend-state.json"
 
-[creative_workflow]
-enabled = true
-writing_task_class = "writing"
-writing_lane = "claude"
-writing_review_lane = "claude"
-user_facing_locales = ["en", "ko"]
-locale_scope = "user-facing-copy"
-image_task_class = "image-generation"
-video_task_class = "video-generation"
-media_lane = "gemini"
-preferred_media_model_track = "nano-banana-latest"
-user_facing_copy_roots = []
-
-[diagram_design]
-enabled = true
-task_class = "diagram-generation"
-lane = "claude"
-style = "diagram-design"
-output_root = "docs/diagrams"
-style_guide_path = "docs/diagrams/diagram-style-guide.md"
-preferred_for = ["architecture", "organization", "process", "system-map", "responsibility-map", "roadmap", "product-explanation"]
-allowed_source_truth_formats = ["mermaid", "d2", "plantuml", "generated-graph"]
-reference_repo = "https://github.com/cathrynlavery/diagram-design"
-reference_ref = "30764f2b1ca950b73fd14f69ff44752abdd19b5a"
-vendor_mode = "external-reference"
-
-[engineering_discipline]
-enabled = true
-domain_context_path = "CONTEXT.md"
-adr_dir = "docs/adr"
-clarification_mode = "bounded-interactive"
-debugging_mode = "feedback-loop-first"
-tdd_slice_mode = "vertical"
-doc_update_policy = "exec-plan-bounded"
-reference_repo = "https://github.com/mattpocock/skills"
-reference_ref = "b843cb5ea74b1fe5e58a0fc23cddef9e66076fb8"
-vendor_mode = "pattern-extraction"
-
 [consultation]
 policy = "best-effort"
 preferred_reviewers = ["claude", "gemini"]
@@ -233,9 +195,9 @@ snapshot_excludes = [".git/", ".env", ".env.*", ".aws/", ".ssh/", "*.pem", "*.ke
 [frontier]
 enabled = true
 orchestrator_lane = "codex"
-task_taxonomy = "../agentOS-upstream-main/config/task_taxonomy.json"
-capability_registry = "../agentOS-upstream-main/config/lane_capability_registry.json"
-routing_policy = "../agentOS-upstream-main/config/routing_policy.json"
+task_taxonomy = "../agentOS/config/task_taxonomy.json"
+capability_registry = "../agentOS/config/lane_capability_registry.json"
+routing_policy = "../agentOS/config/routing_policy.json"
 routing_decisions_dir = "docs/exec-plans/active/routing-decisions"
 worker_reports_dir = "docs/exec-plans/active/worker-reports"
 capability_scorecards_dir = "docs/exec-plans/scorecards"
@@ -246,3 +208,55 @@ improvement_mode = "live-orchestrated"
 [ci]
 harness_validation_mode = "local-only"
 visible_workflows = []
+
+[creative_workflow]
+enabled = true
+writing_task_class = "writing"
+writing_lane = "claude"
+writing_review_lane = "claude"
+user_facing_locales = ["en", "ko"]
+locale_scope = "user-facing-copy"
+image_task_class = "image-generation"
+video_task_class = "video-generation"
+media_lane = "gemini"
+preferred_media_model_track = "nano-banana-latest"
+user_facing_copy_roots = []
+
+[diagram_design]
+enabled = true
+task_class = "diagram-generation"
+lane = "claude"
+style = "diagram-design"
+output_root = "docs/diagrams"
+style_guide_path = "docs/diagrams/diagram-style-guide.md"
+preferred_for = ["architecture", "organization", "process", "system-map", "responsibility-map", "roadmap", "product-explanation"]
+allowed_source_truth_formats = ["mermaid", "d2", "plantuml", "generated-graph"]
+reference_repo = "https://github.com/cathrynlavery/diagram-design"
+reference_ref = "30764f2b1ca950b73fd14f69ff44752abdd19b5a"
+vendor_mode = "external-reference"
+
+[engineering_discipline]
+enabled = true
+domain_context_path = "CONTEXT.md"
+adr_dir = "docs/adr"
+clarification_mode = "bounded-interactive"
+debugging_mode = "feedback-loop-first"
+tdd_slice_mode = "vertical"
+doc_update_policy = "exec-plan-bounded"
+reference_repo = "https://github.com/mattpocock/skills"
+reference_ref = "b843cb5ea74b1fe5e58a0fc23cddef9e66076fb8"
+vendor_mode = "pattern-extraction"
+
+[ui_reference]
+enabled = true
+provider = "lazyweb"
+provider_mode = "external-mcp"
+transport = "streamable-http"
+mcp_url = "https://www.lazyweb.com/mcp"
+token_env = "LAZYWEB_MCP_TOKEN"
+setup_mode = "explicit-helper"
+availability_policy = "warning-only"
+vendor_mode = "external-reference"
+reference_docs = ["https://www.lazyweb.com/index.md", "https://www.lazyweb.com/developers.md", "https://www.lazyweb.com/use-lazyweb.md", "https://www.lazyweb.com/.well-known/mcp/server-card.json"]
+allowed_tools = ["lazyweb_health", "lazyweb_search", "lazyweb_find_similar", "lazyweb_compare_image", "lazyweb_list_categories", "lazyweb_list_collections"]
+recommended_for = ["landing-page", "pricing-page", "onboarding-flow", "checkout-flow", "dashboard", "settings-page", "mobile-app-ui", "public-facing-ui-wave"]

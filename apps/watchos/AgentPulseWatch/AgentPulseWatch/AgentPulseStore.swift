@@ -23,6 +23,36 @@ final class AgentPulseStore: ObservableObject {
         session != nil
     }
 
+    func bootstrapFromLaunchEnvironmentIfNeeded() async {
+        #if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        let forceBootstrap = environment["AGENT_PULSE_BOOTSTRAP_FORCE"] == "1"
+        guard session == nil || forceBootstrap else { return }
+        guard
+            let baseUrl = environment["AGENT_PULSE_BOOTSTRAP_BASE_URL"]?.trimmedNonEmpty,
+            let deviceId = environment["AGENT_PULSE_BOOTSTRAP_DEVICE_ID"]?.trimmedNonEmpty,
+            let token = environment["AGENT_PULSE_BOOTSTRAP_TOKEN"]?.trimmedNonEmpty,
+            let fingerprint = environment["AGENT_PULSE_BOOTSTRAP_FINGERPRINT"]?.trimmedNonEmpty
+        else {
+            return
+        }
+
+        do {
+            let nextSession = AgentPulseSession(
+                baseUrl: baseUrl,
+                deviceId: deviceId,
+                token: token,
+                fingerprint: fingerprint
+            )
+            try keychain.saveSession(nextSession)
+            session = nextSession
+            await refresh()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        #endif
+    }
+
     func pair(baseUrl: String, pin: String) async {
         isLoading = true
         errorMessage = nil
@@ -56,7 +86,9 @@ final class AgentPulseStore: ObservableObject {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            summary = try await AgentPulseClient(session: session).summary()
+            let nextSummary = try await AgentPulseClient(session: session).summary()
+            summary = nextSummary
+            persistStableRemoteSession(from: nextSummary)
             if let selectedThread {
                 self.selectedThread = summary?.threads.first(where: { $0.threadId == selectedThread.threadId }) ?? selectedThread
                 await loadThread(selectedThread.threadId)
@@ -124,6 +156,10 @@ final class AgentPulseStore: ObservableObject {
         }
     }
 
+    func ensurePushRegistration() async {
+        await requestPushPermission()
+    }
+
     func signOut() {
         if let session {
             Task {
@@ -146,6 +182,9 @@ final class AgentPulseStore: ObservableObject {
     }
 
     private func requestPushPermission() async {
+        guard Bundle.main.object(forInfoDictionaryKey: "AgentPulseRemoteNotificationsEnabled") as? Bool == true else {
+            return
+        }
         do {
             let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
             if granted {
@@ -161,5 +200,42 @@ final class AgentPulseStore: ObservableObject {
         if error.localizedDescription.lowercased().contains("revoked") {
             signOut()
         }
+    }
+
+    private func persistStableRemoteSession(from summary: WatchSummaryResponse) {
+        guard
+            let session,
+            summary.remoteAccess.enabled,
+            summary.remoteAccess.mode == "named",
+            let remoteUrl = summary.server.remoteUrl?.trimmedNonEmpty,
+            remoteUrl.hasPrefix("https://"),
+            session.baseUrl.trimmedSlash() != remoteUrl.trimmedSlash()
+        else {
+            return
+        }
+
+        do {
+            let nextSession = AgentPulseSession(
+                baseUrl: remoteUrl,
+                deviceId: session.deviceId,
+                token: session.token,
+                fingerprint: session.fingerprint
+            )
+            try keychain.saveSession(nextSession)
+            self.session = nextSession
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private extension String {
+    var trimmedNonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func trimmedSlash() -> String {
+        hasSuffix("/") ? String(dropLast()) : self
     }
 }

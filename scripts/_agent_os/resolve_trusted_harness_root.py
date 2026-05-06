@@ -148,12 +148,26 @@ def verify_resolved_harness_root(
             fail(f"Resolved global harness file hash does not match the manifest inventory: {item_path}")
 
 
+def run_mandatory_update_gate(repo_harness_path: Path) -> None:
+    helper = Path(__file__).resolve().with_name("ensure_harness_current.py")
+    if not helper.exists():
+        fail(f"Missing mandatory AgentOS pre-action update gate: {helper}")
+    result = subprocess.run(
+        [sys.executable, str(helper), str(repo_harness_path)],
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        fail("Mandatory AgentOS pre-action update gate failed")
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         fail("Usage: resolve_trusted_harness_root.py <repo_harness.toml>")
     repo_harness_path = Path(sys.argv[1]).resolve()
     if not repo_harness_path.exists():
         fail(f"Missing repo_harness.toml: {repo_harness_path}")
+    run_mandatory_update_gate(repo_harness_path)
     with repo_harness_path.open("rb") as handle:
         data = tomllib.load(handle)
     repo_root = repo_harness_path.parent

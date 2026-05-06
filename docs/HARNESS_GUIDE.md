@@ -16,7 +16,7 @@ This repository inherits its shared operating model from `agentOS`.
 
 ## Global harness / 전역 하니스
 
-- configured `global_harness_root`: `../agentOS-upstream-main`
+- configured `global_harness_root`: `../agentOS`
 - canonical `global_harness_repo`: `https://github.com/Dope-AI-KR/agentOS`
 
 Read the global harness docs for shared workflow, validation, review, MCP, and

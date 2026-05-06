@@ -2172,6 +2172,37 @@ dd {
   gap: 12px;
 }
 
+.remote-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.remote-form input,
+.remote-form select {
+  min-height: 44px;
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.remote-form input:focus,
+.remote-form select:focus {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+  border-color: var(--focus-ring);
+}
+
+.remote-hostname-field {
+  grid-column: 1 / -1;
+}
+
 .remote-actions {
   grid-column: 1 / -1;
   display: flex;

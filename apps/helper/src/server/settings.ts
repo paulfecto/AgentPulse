@@ -22,13 +22,15 @@ export type HelperSettings = {
 
 export class HelperSettingsStore {
   constructor(
-    private readonly settingsPath = path.join(
-      homedir(),
-      'Library',
-      'Application Support',
-      'Agent Pulse',
-      'settings.json'
-    )
+    private readonly settingsPath =
+      process.env.AGENT_PULSE_SETTINGS_PATH?.trim() ||
+      path.join(
+        homedir(),
+        'Library',
+        'Application Support',
+        'Agent Pulse',
+        'settings.json'
+      )
   ) {}
 
   async load(): Promise<HelperSettings> {

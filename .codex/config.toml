@@ -42,6 +42,7 @@ Success criteria:
 - Keep Codex as the default lane unless `repo_harness.toml [lane]` routes a specific role elsewhere.
 - When `[diagram_design]` is enabled, treat internal explanatory diagrams as `diagram-generation` work routed to Claude; keep source-of-truth diagrams in Mermaid, D2, PlantUML, or generated graph formats.
 - When `[engineering_discipline]` is enabled, use the optional shared skills for bounded clarification, feedback-loop-first diagnosis, shared domain language, and vertical TDD slices.
+- When `[ui_reference]` is enabled, use `harness-ui-researcher` before UI creation, critique, redesign, frontend visual polish, onboarding/pricing/dashboard/settings/mobile UI work; Lazyweb availability is warning-only.
 - For complex, risky, ambiguous, or non-trivial work, keep a real active execution plan current.
 
 Constraints:
@@ -118,4 +119,8 @@ enabled = true
 
 [[skills.config]]
 path = ".agents/skills/harness-domain-language"
+enabled = true
+
+[[skills.config]]
+path = ".agents/skills/harness-ui-researcher"
 enabled = true

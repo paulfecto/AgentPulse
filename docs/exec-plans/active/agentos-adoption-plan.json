@@ -9,9 +9,10 @@
     "external_resume": false,
     "gemini_media_workflow": false,
     "primary_lane": "codex",
-    "repo_type": "fullstack-web"
+    "repo_type": "fullstack-web",
+    "ui_reference_workflow": true
   },
-  "generated_at": "2026-05-05T04:45:39Z",
+  "generated_at": "2026-05-05T13:53:04Z",
   "install": {
     "enabled_features": [
       "core",
@@ -19,10 +20,11 @@
       "browser-containerized",
       "frontier",
       "secondary-lanes",
+      "termination-supervisor",
       "creative-workflow",
       "diagram-design",
       "engineering-discipline",
-      "termination-supervisor"
+      "ui-reference"
     ],
     "profile": "frontier"
   },
@@ -31,7 +33,8 @@
     "Use current adapter contract surfaces instead of old compatibility inference.",
     "Route writing tasks to Claude through the creative-workflow feature.",
     "Use diagram-design as the preferred style for internal explanatory diagrams, with Mermaid/D2/PlantUML/generated graphs reserved for source-of-truth diagrams.",
-    "Use engineering-discipline for bounded clarification, feedback-loop-first debugging, CONTEXT.md domain language, ADRs, and vertical TDD slices."
+    "Use engineering-discipline for bounded clarification, feedback-loop-first debugging, CONTEXT.md domain language, ADRs, and vertical TDD slices.",
+    "Use ui-reference for Lazyweb-backed UI/UX reference grounding before UI creation, critique, redesign, or polish."
   ],
   "repo_path": "/Volumes/paulfecto/Development_team/AgentPulse",
   "schema_version": "1.0",

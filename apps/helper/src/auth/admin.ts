@@ -32,7 +32,8 @@ export class AdminAuth {
   constructor(options: AdminAuthOptions = {}) {
     this.credentialsPath =
       options.credentialsPath ??
-      path.join(homedir(), 'Library', 'Application Support', 'Agent Pulse', 'admin.json');
+      (process.env.AGENT_PULSE_ADMIN_CREDENTIALS_PATH?.trim() ||
+        path.join(homedir(), 'Library', 'Application Support', 'Agent Pulse', 'admin.json'));
     this.tokenTtlMs = options.tokenTtlMs ?? DEFAULT_TOKEN_TTL_MS;
     this.now = options.now ?? (() => new Date());
     this.onPasscodeGenerated = options.onPasscodeGenerated;

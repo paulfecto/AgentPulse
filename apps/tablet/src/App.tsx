@@ -61,6 +61,7 @@ import {
   clearSession,
   checkWatchNotifications,
   checkRemoteAccess,
+  configureCloudflareRemoteAccess,
   createTranscriptCommentDraft,
   createHandoffSummaryDraft,
   deleteHandoff,
@@ -87,6 +88,7 @@ import {
   liveEventsUrl,
   loadAdminToken,
   loadSession,
+  loginCloudflareRemoteAccess,
   openThreadInCodex,
   pairDevice,
   recoverDeviceSession,
@@ -3378,7 +3380,12 @@ function SettingsScreen({
   };
 
   const toggleRemoteAccess = async () => {
-    const next = await updateRemoteAccess(adminToken, { enabled: !remoteAccess.enabled, mode: 'quick' });
+    const next = await updateRemoteAccess(adminToken, {
+      enabled: !remoteAccess.enabled,
+      mode: remoteAccess.mode,
+      hostname: remoteAccess.hostname,
+      tunnelName: remoteAccess.tunnelName
+    });
     setRemoteAccess(next);
   };
 
@@ -3387,6 +3394,21 @@ function SettingsScreen({
       tunnelProtocol,
       ...(remoteAccess.enabled ? { enabled: true } : {})
     });
+    setRemoteAccess(next);
+  };
+
+  const configureRemoteAccess = async (input: {
+    mode?: RemoteAccessSettings['mode'];
+    tunnelProtocol?: RemoteAccessSettings['tunnelProtocol'];
+    hostname?: string;
+    tunnelName?: string;
+  }) => {
+    const next = await configureCloudflareRemoteAccess(adminToken, input);
+    setRemoteAccess(next);
+  };
+
+  const loginRemoteAccess = async () => {
+    const next = await loginCloudflareRemoteAccess(adminToken);
     setRemoteAccess(next);
   };
 
@@ -3497,6 +3519,8 @@ function SettingsScreen({
           remoteAccess={remoteAccess}
           onCheck={() => void refreshRemoteAccess()}
           onProtocolChange={(protocol) => void updateTunnelProtocol(protocol)}
+          onConfigure={configureRemoteAccess}
+          onLogin={loginRemoteAccess}
         />
 
         <WatchNotificationsPanel
@@ -3664,13 +3688,33 @@ function SettingsScreen({
 function RemoteAccessPanel({
   remoteAccess,
   onCheck,
-  onProtocolChange
+  onProtocolChange,
+  onConfigure,
+  onLogin
 }: {
   remoteAccess: RemoteAccessSettings;
   onCheck: () => void;
   onProtocolChange: (protocol: RemoteAccessSettings['tunnelProtocol']) => void;
+  onConfigure: (input: {
+    mode?: RemoteAccessSettings['mode'];
+    tunnelProtocol?: RemoteAccessSettings['tunnelProtocol'];
+    hostname?: string;
+    tunnelName?: string;
+  }) => Promise<void>;
+  onLogin: () => Promise<void>;
 }) {
   const [qrCode, setQrCode] = useState('');
+  const [draftMode, setDraftMode] = useState<RemoteAccessSettings['mode']>(remoteAccess.mode);
+  const [draftHostname, setDraftHostname] = useState(remoteAccess.hostname);
+  const [draftTunnelName, setDraftTunnelName] = useState(remoteAccess.tunnelName);
+  const [busy, setBusy] = useState<'configure' | 'login' | undefined>();
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setDraftMode(remoteAccess.mode);
+    setDraftHostname(remoteAccess.hostname);
+    setDraftTunnelName(remoteAccess.tunnelName);
+  }, [remoteAccess.hostname, remoteAccess.mode, remoteAccess.tunnelName]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3699,12 +3743,42 @@ function RemoteAccessPanel({
     };
   }, [remoteAccess.publicUrl]);
 
+  const stableMode = draftMode === 'named';
+  const publicUrlLabel = remoteAccess.mode === 'named' ? 'Stable Watch URL' : 'Temporary public URL';
+  const configureRemote = async () => {
+    setBusy('configure');
+    setError('');
+    try {
+      await onConfigure({
+        mode: draftMode,
+        tunnelProtocol: remoteAccess.tunnelProtocol,
+        hostname: draftHostname,
+        tunnelName: draftTunnelName
+      });
+    } catch (configureError) {
+      setError(configureError instanceof Error ? configureError.message : 'Could not configure remote access.');
+    } finally {
+      setBusy(undefined);
+    }
+  };
+  const loginRemote = async () => {
+    setBusy('login');
+    setError('');
+    try {
+      await onLogin();
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : 'Could not start Cloudflare login.');
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
   return (
     <section className="settings-panel settings-panel-wide remote-panel">
       <PanelHeading
         icon={<Cloud size={22} />}
         title="Remote access"
-        description="No domain needed. Agent Pulse will ask Cloudflare for a temporary public URL."
+        description="Use a Cloudflare Tunnel. Stable hostname mode is required for Apple Watch access away from this network."
       />
 
       <div className="remote-status-row">
@@ -3712,9 +3786,56 @@ function RemoteAccessPanel({
           {remoteStatusLabel(remoteAccess)}
         </span>
         {remoteAccess.lastError ? <p className="remote-error">{remoteAccess.lastError}</p> : null}
+        {error ? <p className="remote-error">{error}</p> : null}
+      </div>
+
+      <div className="remote-form">
+        <label>
+          Tunnel mode
+          <select
+            value={draftMode}
+            onChange={(event) => setDraftMode(event.currentTarget.value as RemoteAccessSettings['mode'])}
+          >
+            <option value="named">Stable hostname</option>
+            <option value="quick">Temporary URL</option>
+          </select>
+        </label>
+        <label>
+          Tunnel name
+          <input
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            value={draftTunnelName}
+            onChange={(event) => setDraftTunnelName(event.currentTarget.value)}
+          />
+        </label>
+        {stableMode ? (
+          <label className="remote-hostname-field">
+            Cloudflare hostname
+            <input
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="pulse.example.com"
+              value={draftHostname}
+              onChange={(event) => setDraftHostname(event.currentTarget.value)}
+            />
+          </label>
+        ) : null}
       </div>
 
       <div className="remote-actions">
+        {stableMode ? (
+          <button className="secondary-action" type="button" onClick={() => void loginRemote()} disabled={Boolean(busy)}>
+            <LogIn size={16} />
+            {busy === 'login' ? 'Opening login' : 'Cloudflare login'}
+          </button>
+        ) : null}
+        <button className="secondary-action" type="button" onClick={() => void configureRemote()} disabled={Boolean(busy)}>
+          <Cloud size={16} />
+          {busy === 'configure' ? 'Configuring' : 'Configure tunnel'}
+        </button>
         <button className="secondary-action" type="button" onClick={onCheck}>
           <RefreshCw size={16} />
           Check setup
@@ -3745,9 +3866,9 @@ function RemoteAccessPanel({
 
       <div className="remote-checklist" aria-label="Remote access checklist">
         <ChecklistItem label="cloudflared installed" done={remoteAccess.checklist.dependencyInstalled} />
-        <ChecklistItem label="No domain needed" done={remoteAccess.checklist.authenticated} />
-        <ChecklistItem label="Quick tunnel ready" done={remoteAccess.checklist.configured} />
-        <ChecklistItem label="Random URL ready" done={remoteAccess.checklist.hostnameAssigned} />
+        <ChecklistItem label={stableMode ? 'Cloudflare login' : 'No login needed'} done={remoteAccess.checklist.authenticated} />
+        <ChecklistItem label={stableMode ? 'Named tunnel ready' : 'Quick tunnel ready'} done={remoteAccess.checklist.configured} />
+        <ChecklistItem label={stableMode ? 'Hostname routed' : 'Random URL ready'} done={remoteAccess.checklist.hostnameAssigned} />
         <ChecklistItem label="Tunnel running" done={remoteAccess.checklist.tunnelRunning} />
       </div>
 
@@ -3755,7 +3876,7 @@ function RemoteAccessPanel({
         <div className="remote-url-box">
           {qrCode ? <img src={qrCode} alt="Remote access QR code" /> : null}
           <div>
-            <p className="eyebrow">Public URL</p>
+            <p className="eyebrow">{publicUrlLabel}</p>
             <strong>{remoteAccess.publicUrl}</strong>
             <button
               className="secondary-action"
@@ -3771,7 +3892,9 @@ function RemoteAccessPanel({
         </div>
       ) : (
         <div className="remote-empty">
-          Turn on remote access to create a temporary Cloudflare URL and QR code.
+          {stableMode
+            ? 'Enter a Cloudflare hostname, configure the tunnel, then turn on remote access.'
+            : 'Configure temporary URL mode, then turn on remote access to create a Cloudflare URL.'}
         </div>
       )}
     </section>

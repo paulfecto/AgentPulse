@@ -11,12 +11,13 @@ Adopt the current AgentOS contract for this downstream repo before harness-manag
 - developer progress panel: `false`
 - diagram design workflow: `true`
 - engineering discipline workflow: `true`
+- UI reference workflow: `true`
 - continuous local iteration: `false`
 - external resume: `false`
 
 ## Planned Install Selection
 - profile: `frontier`
-- enabled features: `core, consultation, browser-containerized, frontier, secondary-lanes, creative-workflow, diagram-design, engineering-discipline, termination-supervisor`
+- enabled features: `core, consultation, browser-containerized, frontier, secondary-lanes, termination-supervisor, creative-workflow, diagram-design, engineering-discipline, ui-reference`
 
 ## Recommendations
 - Keep AgentOS setup plan-first: answer project-specific questions before mutation.
@@ -24,6 +25,7 @@ Adopt the current AgentOS contract for this downstream repo before harness-manag
 - Route writing tasks to Claude through the creative-workflow feature.
 - Use diagram-design as the preferred style for internal explanatory diagrams, with Mermaid/D2/PlantUML/generated graphs reserved for source-of-truth diagrams.
 - Use engineering-discipline for bounded clarification, feedback-loop-first debugging, CONTEXT.md domain language, ADRs, and vertical TDD slices.
+- Use ui-reference for Lazyweb-backed UI/UX reference grounding before UI creation, critique, redesign, or polish.
 
 ## Acceptance
 - Run install/update with `--accept-adoption-plan` to apply this plan.

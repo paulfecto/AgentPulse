@@ -57,6 +57,7 @@ catalog.start();
 const appServer = new CodexAppServerChat(new CodexAppServerClient({ version: app.getVersion() }));
 const claudeCode = new ClaudeCodeProvider();
 const copilot = new CopilotProvider();
+const desktopControlDisabled = process.env.AGENT_PULSE_DISABLE_CODEX_DESKTOP === '1';
 
 // IPC mirror to a running Codex desktop window. See dev-server.ts for the
 // rationale on why we don't wire onStreamingChange / onPendingApprovalsChange
@@ -70,7 +71,11 @@ const ipc = createIpcClient({
   }
 });
 const mirror = createCodexMirror({ ipc, reader: appServer });
-ipc.connect();
+if (!desktopControlDisabled) {
+  ipc.connect();
+} else {
+  console.log('[agent-pulse] Codex desktop IPC/open control disabled for this runtime.');
+}
 
 const seenThreadStore = new SeenThreadStore();
 
@@ -98,6 +103,7 @@ async function startOrRestartServer(): Promise<RunningAgentPulseServer> {
     adminAuth,
     threadProvider: threadReader,
     opener,
+    desktopControlDisabled,
     appServer,
     mirror,
     claudeCode,

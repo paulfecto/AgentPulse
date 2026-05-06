@@ -1,7 +1,7 @@
 # Session Start
 
-- active task: `apple-watch-support`
-- plan: `docs/exec-plans/active/apple-watch-support.md`
+- active task: `agentos-convergence`
+- plan: `docs/exec-plans/active/agentos-convergence.md`
 - owner lane: `codex`
 - current status: `in-progress`
 - next proof gate: no outstanding proof gates

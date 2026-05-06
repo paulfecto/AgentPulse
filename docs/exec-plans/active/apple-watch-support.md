@@ -46,6 +46,7 @@ Build Agent Pulse Apple Watch v1 as a glance-and-act native watch surface backed
 - `apps/helper/src/server/agent-pulse-server.test.ts`
 - `apps/tablet/src/api.ts`
 - `apps/tablet/src/App.tsx`
+- `apps/tablet/src/App.test.tsx`
 - `apps/tablet/src/styles.css`
 - `apps/watchos/AgentPulseWatch/**`
 
@@ -66,6 +67,10 @@ These files already exceed the harness size threshold in the current repo. This 
   disposition: `preserve-only`
   reason-code: `deferred-decomposition`
 - file: `apps/tablet/src/App.tsx`
+  classification: `handwritten-source`
+  disposition: `preserve-only`
+  reason-code: `deferred-decomposition`
+- file: `apps/tablet/src/App.test.tsx`
   classification: `handwritten-source`
   disposition: `preserve-only`
   reason-code: `deferred-decomposition`
@@ -134,7 +139,7 @@ These files already exceed the harness size threshold in the current repo. This 
 - Docker targeted watch/helper/tablet check passed: `pnpm exec vitest run apps/helper/src/server/watch-push.test.ts apps/helper/src/server/agent-pulse-server.test.ts apps/tablet/src/App.test.tsx` passed 3 files / 173 tests.
 - Docker full test gate passed after final code changes: `pnpm test` passed 34 files / 449 tests.
 - Docker type/build gate passed after final code changes: `pnpm typecheck` passed and `pnpm build` passed.
-- Docker AgentOS gate initially caught stale upstream and ledger state; `../agentOS-upstream-main` was restored to `11274a64f909ea1ee0a3c92455b4d291ba8ea344`.
+- Docker AgentOS gate initially caught stale upstream and ledger state; `../agentOS` was restored to `11274a64f909ea1ee0a3c92455b4d291ba8ea344`.
 - Docker AgentOS final gate passed: `verify_harness.py`, `verify_protocol.py`, and `verify_exec_plan.py --stage start`.
 - WatchOS host build was not run because the user required normal repo validation to stay Docker-only and watchOS signing/building requires Xcode plus Apple provisioning outside Docker. The checked-in README documents the host-side Xcode checks.
 

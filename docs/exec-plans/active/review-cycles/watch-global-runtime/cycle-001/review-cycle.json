@@ -1,0 +1,18 @@
+{
+  "artifact_kind": "agentos-review-cycle",
+  "artifacts": {
+    "pr_body": "docs/exec-plans/active/review-cycles/watch-global-runtime/cycle-001/pr-body.md",
+    "review_comments": "docs/exec-plans/active/review-cycles/watch-global-runtime/cycle-001/review-comments.md",
+    "review_context": "docs/exec-plans/active/review-cycles/watch-global-runtime/cycle-001/review-context.md",
+    "review_cycle": "docs/exec-plans/active/review-cycles/watch-global-runtime/cycle-001/review-cycle.json",
+    "review_verdict": "docs/exec-plans/active/review-cycles/watch-global-runtime/cycle-001/review-verdict.md"
+  },
+  "base_ref": "main",
+  "cycle_id": "cycle-001",
+  "cycle_path": "docs/exec-plans/active/review-cycles/watch-global-runtime/cycle-001",
+  "generated_artifacts_are_canonical": false,
+  "generated_at": "2026-05-05T13:48:37Z",
+  "plan": "docs/exec-plans/active/watch-global-runtime.md",
+  "schema_version": "1.0.0",
+  "source_of_truth_note": "Generated review-cycle artifacts ground review work but do not replace the active execution plan or repo source files."
+}

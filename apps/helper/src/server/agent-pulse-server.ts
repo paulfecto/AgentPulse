@@ -317,6 +317,7 @@ export type AgentPulseServerOptions = {
     listProjects?(): Promise<Project[]>;
   };
   opener: ThreadOpener;
+  desktopControlDisabled?: boolean;
   appServer?: AppServerChatBridge;
   mirror?: CodexMirrorBridge;
   claudeCode?: ClaudeCodeBridge;
@@ -427,6 +428,7 @@ function createApp(
   tabletDevProxy?: TabletDevProxy
 ): CreatedApp {
   const app = new Hono();
+  const desktopControlDisabled = options.desktopControlDisabled === true;
   const startedAt = Date.now();
   const localAttachments = new Map<string, LocalAttachment>();
   // Tracks the last status we observed per thread so the watch-push hook only
@@ -646,6 +648,9 @@ function createApp(
   };
   const completedTurnKey = (threadId: string, turnId: string): string => `${threadId}:${turnId}`;
   const markDesktopInterest = (threadId: string): void => {
+    if (desktopControlDisabled) {
+      return;
+    }
     desktopInterestUntilByThread.set(threadId, Date.now() + DESKTOP_INTEREST_TTL_MS);
   };
   const hasDesktopInterest = (threadId: string): boolean => {
@@ -660,6 +665,12 @@ function createApp(
     return true;
   };
   const openThreadWithMiniRefresh = async (threadId: string): Promise<{ ok: boolean; error?: string }> => {
+    if (desktopControlDisabled) {
+      return {
+        ok: false,
+        error: 'Codex desktop control is disabled for this Agent Pulse runtime.'
+      };
+    }
     const now = Date.now();
     const lastManualOpenAt = lastManualOpenAtByThread.get(threadId) ?? 0;
     if (hasDesktopInterest(threadId) && now - lastManualOpenAt < MANUAL_OPEN_COOLDOWN_MS) {
@@ -687,6 +698,9 @@ function createApp(
     return opening;
   };
   const waitForDesktopOwnership = async (threadId: string): Promise<void> => {
+    if (desktopControlDisabled) {
+      return;
+    }
     if (!options.mirror?.waitForOwnership) {
       return;
     }
@@ -706,6 +720,9 @@ function createApp(
     }
   };
   const isEligibleForAutoDesktopRefresh = (candidate: DesktopRefreshCandidate): boolean => {
+    if (desktopControlDisabled) {
+      return false;
+    }
     if (!hasDesktopInterest(candidate.threadId)) {
       return false;
     }
@@ -755,6 +772,24 @@ function createApp(
     if (!completedTranscriptTurnKeys.has(key)) {
       completedTranscriptTurnKeys.add(key);
       void broadcastFreshTranscript(candidate.threadId);
+    }
+    const status: Thread['status'] =
+      options.appServer?.isThreadWaitingForApproval?.(candidate.threadId)
+        ? 'waiting_approval'
+        : options.appServer?.isThreadCompacting?.(candidate.threadId)
+          ? 'compacting'
+          : options.appServer?.isThreadStreaming?.(candidate.threadId)
+            ? 'running'
+            : 'idle';
+    hub.broadcast({
+      type: 'thread/status/changed',
+      payload: { threadId: candidate.threadId, status }
+    });
+    const draftThread = draftThreads.get(candidate.threadId);
+    if (draftThread) {
+      const nextDraftThread = ThreadSchema.parse({ ...draftThread, status });
+      draftThreads.set(candidate.threadId, nextDraftThread);
+      hub.broadcast({ type: 'thread/upsert', payload: nextDraftThread });
     }
     if (!agentPulseOwnedTurnKeys.delete(key)) {
       return;
@@ -1618,9 +1653,16 @@ function createApp(
         },
         remoteAccess: {
           enabled: remoteAccess.enabled,
+          mode: remoteAccess.mode,
           status: remoteAccess.status,
           publicUrl: remoteAccess.publicUrl,
           hostname: remoteAccess.hostname
+        },
+        capabilities: {
+          canOpenOnMac: !desktopControlDisabled,
+          ...(desktopControlDisabled
+            ? { openOnMacReason: 'Open on Mac is disabled for this real Watch E2E runtime.' }
+            : {})
         },
         threads: compactThreads
       })
@@ -1645,7 +1687,7 @@ function createApp(
     }
 
     const { threads } = await listAllThreads();
-    const inbox = buildApprovalInbox(threads, pendingRequestsForThread);
+    const inbox = buildApprovalInbox(threads, pendingRequestsForThread, desktopControlDisabled);
     return context.json(ApprovalInboxResponseSchema.parse(inbox));
   });
 
@@ -1658,7 +1700,7 @@ function createApp(
     const threadId = context.req.query('threadId')?.trim();
     return context.json(
       TouchCommandSheetResponseSchema.parse({
-        commands: buildTouchCommands(Boolean(threadId))
+        commands: buildTouchCommands(Boolean(threadId), desktopControlDisabled)
       })
     );
   });
@@ -2125,12 +2167,17 @@ function createApp(
         ),
         transcriptView
       );
-      return context.json(
-        ThreadTranscriptSchema.parse({
-          ...visibleTranscript,
-          ...(usage ? { usage } : {})
-        })
-      );
+      const parsedTranscript = ThreadTranscriptSchema.parse({
+        ...visibleTranscript,
+        ...(usage ? { usage } : {})
+      });
+      const draftThread = draftThreads.get(threadId);
+      if (draftThread) {
+        const nextDraftThread = updateDraftThreadFromTranscript(draftThread, parsedTranscript);
+        draftThreads.set(threadId, nextDraftThread);
+        hub.broadcast({ type: 'thread/upsert', payload: nextDraftThread });
+      }
+      return context.json(parsedTranscript);
     } catch {
       return context.json({ error: 'Codex connection unavailable.' }, 503);
     }
@@ -2384,7 +2431,7 @@ function createApp(
       }
 
       await options.appServer?.ensureConnected?.().catch(() => undefined);
-      const mirrorReady = options.mirror?.isConnected() === true;
+      const mirrorReady = !desktopControlDisabled && options.mirror?.isConnected() === true;
       const appServerReady =
         options.appServer?.isConnected() === true && typeof options.appServer.sendMessage === 'function';
       if (!mirrorReady && !appServerReady) {
@@ -2566,7 +2613,11 @@ function createApp(
     // queued behind the response. Decline the pending requests first so Codex
     // unblocks itself; this is enough to put a `requestUserInput` thread back
     // into idle. Best-effort: failures here don't prevent the interrupt.
-    if (options.mirror?.getPendingApprovalRequests && options.mirror.respondToApproval) {
+    if (
+      !desktopControlDisabled &&
+      options.mirror?.getPendingApprovalRequests &&
+      options.mirror.respondToApproval
+    ) {
       const pending = options.mirror.getPendingApprovalRequests(threadId);
       for (const request of pending) {
         // Empty answers map / cancel / decline — these all tell Codex "the user
@@ -2723,6 +2774,12 @@ function createApp(
     }
     if (isCopilotThreadId(parsed.threadId)) {
       return context.json({ ok: false, error: 'GitHub Copilot chats are controlled directly in Agent Pulse.' }, 405);
+    }
+    if (desktopControlDisabled) {
+      return context.json(
+        { ok: false, error: 'Codex desktop control is disabled for this Agent Pulse runtime.' },
+        403
+      );
     }
     await registerKnownSharedCodexChatThread(parsed.threadId);
     const result = await openThreadWithMiniRefresh(parsed.threadId);
@@ -2991,6 +3048,12 @@ function createApp(
         return context.json({ error: `Could not record approval: ${detail}` }, 503);
       }
     }
+    if (desktopControlDisabled) {
+      return context.json(
+        { error: 'Codex desktop control is disabled for this Agent Pulse runtime.' },
+        403
+      );
+    }
     if (!options.mirror?.respondToApproval || !options.mirror.isConnected()) {
       return context.json(
         { error: 'Codex desktop IPC is not available to respond to approvals.' },
@@ -3081,6 +3144,12 @@ function createApp(
     // runWithFollowerOwnership opens the thread on the Mac if Codex desktop
     // doesn't already own it, then waits for the ownership broadcast before
     // sending. Errors propagate as 503 so the tablet's model chip rolls back.
+    if (desktopControlDisabled) {
+      return context.json(
+        { error: 'Codex desktop control is disabled for this Agent Pulse runtime.' },
+        403
+      );
+    }
     if (!options.mirror?.setModelAndReasoning || !options.mirror.isConnected()) {
       return context.json(
         { error: 'Codex desktop is not connected. Open Codex on this Mac to change the model.' },
@@ -4639,11 +4708,37 @@ function reconciledThreadStatus(thread: Thread, transcript: ThreadTranscript): T
   if (transcriptStatus !== 'idle') {
     return resolveThreadStatus([thread.status, transcriptStatus]);
   }
+  if (transcriptHasCompletedAssistantTurn(transcript)) {
+    return 'idle';
+  }
 
   const lastActivityMs = Date.parse(thread.lastActivityAt);
   const isRecent =
     Number.isFinite(lastActivityMs) && Date.now() - lastActivityMs < ACTIVE_RECENCY_MS;
   return isRecent ? resolveThreadStatus([thread.status, transcriptStatus]) : transcriptStatus;
+}
+
+function transcriptHasCompletedAssistantTurn(transcript: ThreadTranscript): boolean {
+  let lastUserIndex = -1;
+  for (let index = transcript.messages.length - 1; index >= 0; index -= 1) {
+    const message = transcript.messages[index];
+    if (message?.role === 'user' && typeof message.turnId === 'string') {
+      lastUserIndex = index;
+      break;
+    }
+  }
+  if (lastUserIndex < 0) {
+    return false;
+  }
+
+  const turnId = transcript.messages[lastUserIndex]?.turnId;
+  if (!turnId) {
+    return false;
+  }
+
+  return transcript.messages
+    .slice(lastUserIndex + 1)
+    .some((message) => message.role === 'assistant' && message.turnId === turnId);
 }
 
 async function reconcileThreadStatuses(
@@ -4721,6 +4816,9 @@ function applyAppServerLiveThreadStatus(
   // notification while disconnected), trust the remote status. This keeps the
   // tablet's working badge correct even after a brief helper reconnect.
   const remote = liveStatuses?.get(thread.threadId);
+  if (remote === 'idle' && thread.status !== 'idle') {
+    return ThreadSchema.parse({ ...thread, status: 'idle' });
+  }
   if (remote && remote !== 'idle' && remote !== 'unknown') {
     return ThreadSchema.parse({ ...thread, status: remote });
   }
@@ -4730,8 +4828,12 @@ function applyAppServerLiveThreadStatus(
 
 function buildApprovalInbox(
   threads: Thread[],
-  pendingRequestsForThread: (threadId: string) => PendingApprovalRequest[]
+  pendingRequestsForThread: (threadId: string) => PendingApprovalRequest[],
+  desktopControlDisabled = false
 ): { items: ApprovalInboxItem[]; total: number } {
+  const availableActions = desktopControlDisabled
+    ? ['open_thread', 'respond']
+    : ['open_thread', 'open_on_mac', 'respond'];
   const items = threads.flatMap((thread) => {
     const provider = providerForMemoryThread(thread);
     return pendingRequestsForThread(thread.threadId).map((request) => {
@@ -4749,7 +4851,7 @@ function buildApprovalInbox(
         ...(commandOrFileSummary ? { commandOrFileSummary } : {}),
         ageMs: Math.max(0, Date.now() - Date.parse(thread.lastActivityAt)),
         riskLevel: approvalRiskLevel(request),
-        availableActions: ['open_thread', 'open_on_mac', 'respond'],
+        availableActions,
         createdAt: thread.lastActivityAt
       });
     });
@@ -4775,7 +4877,7 @@ function mergePendingApprovalRequests(
   return [...byKey.values()];
 }
 
-function buildTouchCommands(hasActiveThread: boolean) {
+function buildTouchCommands(hasActiveThread: boolean, desktopControlDisabled = false) {
   return TouchCommandSheetResponseSchema.shape.commands.parse([
     {
       id: 'new-thread',
@@ -4806,8 +4908,12 @@ function buildTouchCommands(hasActiveThread: boolean) {
       label: 'Open on Mac',
       description: 'Open the active thread locally.',
       action: 'open_on_mac',
-      enabled: hasActiveThread,
-      disabledReason: hasActiveThread ? undefined : 'Open a thread first.',
+      enabled: hasActiveThread && !desktopControlDisabled,
+      disabledReason: desktopControlDisabled
+        ? 'Codex desktop control is disabled for this Agent Pulse runtime.'
+        : hasActiveThread
+          ? undefined
+          : 'Open a thread first.',
       context: 'thread'
     },
     {

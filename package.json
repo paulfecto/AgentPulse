@@ -10,6 +10,8 @@
     "dev": "pnpm --filter @agent-pulse/tablet dev",
     "dev:run": "bash ./scripts/dev-run-all.sh",
     "dev:run:local": "bash ./scripts/dev-run.sh",
+    "watch:icons": "bash ./scripts/generate-watch-icons.sh",
+    "watch:remote": "bash ./scripts/watch-remote-helper.sh",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit"

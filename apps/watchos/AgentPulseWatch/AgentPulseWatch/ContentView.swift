@@ -4,7 +4,7 @@ struct ContentView: View {
     @EnvironmentObject private var store: AgentPulseStore
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             Group {
                 if store.isPaired {
                     SummaryView()
@@ -12,12 +12,11 @@ struct ContentView: View {
                     PairingView()
                 }
             }
-            .navigationDestination(item: $store.selectedThread) { thread in
-                ThreadDetailView(thread: thread)
-            }
         }
         .task {
+            await store.bootstrapFromLaunchEnvironmentIfNeeded()
             if store.isPaired {
+                await store.ensurePushRegistration()
                 await store.refresh()
             }
         }
@@ -31,15 +30,21 @@ struct PairingView: View {
 
     var body: some View {
         Form {
+            Section {
+                HStack {
+                    Spacer()
+                    WatchLogoMark(size: 54)
+                    Spacer()
+                }
+            }
             Section("Helper") {
                 TextField("https://helper-url", text: $baseUrl)
                     .textInputAutocapitalization(.never)
                 TextField("PIN", text: $pin)
-                    .keyboardType(.numberPad)
             }
             if let error = store.errorMessage {
                 Text(error)
-                    .foregroundStyle(.red)
+                    .foregroundColor(.red)
             }
             Button {
                 Task { await store.pair(baseUrl: baseUrl, pin: pin) }
@@ -61,22 +66,40 @@ struct SummaryView: View {
 
     var body: some View {
         List {
+            if let selectedThread = store.selectedThread {
+                NavigationLink(
+                    destination: ThreadDetailView(thread: selectedThread),
+                    isActive: selectedThreadIsActive
+                ) {
+                    EmptyView()
+                }
+                .hidden()
+            }
             if let summary = store.summary {
                 Section(summary.server.helperName) {
                     HStack {
+                        WatchLogoMark(size: 24)
                         StatusDot(status: summary.remoteAccess.status)
                         Text(summary.remoteAccess.enabled ? summary.remoteAccess.status : "local")
                     }
                     Text("v\(summary.server.version)")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(.secondary)
                 }
                 Section("Threads") {
-                    ForEach(summary.threads) { thread in
-                        Button {
-                            Task { await store.select(thread) }
-                        } label: {
-                            ThreadRow(thread: thread)
+                    if summary.threads.isEmpty {
+                        HStack {
+                            Spacer()
+                            WatchLogoMark(size: 34)
+                            Spacer()
+                        }
+                    } else {
+                        ForEach(summary.threads) { thread in
+                            Button {
+                                Task { await store.select(thread) }
+                            } label: {
+                                ThreadRow(thread: thread)
+                            }
                         }
                     }
                 }
@@ -85,19 +108,45 @@ struct SummaryView: View {
             }
             if let error = store.errorMessage {
                 Text(error)
-                    .foregroundStyle(.red)
+                    .foregroundColor(.red)
             }
             Button("Refresh") {
                 Task { await store.refresh() }
             }
-            Button("Unpair", role: .destructive) {
+            Button("Unpair") {
                 store.signOut()
             }
+            .foregroundColor(.red)
         }
         .navigationTitle("Agent Pulse")
         .refreshable {
             await store.refresh()
         }
+    }
+
+    private var selectedThreadIsActive: Binding<Bool> {
+        Binding(
+            get: { store.selectedThread != nil },
+            set: { isActive in
+                if !isActive {
+                    store.selectedThread = nil
+                    store.transcript = nil
+                }
+            }
+        )
+    }
+}
+
+struct WatchLogoMark: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image("AgentPulseLogo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+            .accessibilityHidden(true)
     }
 }
 
@@ -113,7 +162,7 @@ struct ThreadRow: View {
             }
             Text(thread.lastTurnSummary.isEmpty ? thread.workspace : thread.lastTurnSummary)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundColor(.secondary)
                 .lineLimit(2)
         }
     }

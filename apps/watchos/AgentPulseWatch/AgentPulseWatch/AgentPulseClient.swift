@@ -78,7 +78,7 @@ final class AgentPulseClient {
             body: WatchPushRequest(
                 pushToken: token,
                 bundleId: "com.paulfecto.AgentPulse.watchkitapp",
-                environment: nil
+                environment: "sandbox"
             )
         )
     }

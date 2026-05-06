@@ -13,7 +13,7 @@ struct ThreadDetailView: View {
                         .font(.headline)
                     Text(thread.workspace)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(.secondary)
                     HStack {
                         StatusDot(status: thread.status.rawValue)
                         Text(thread.status.rawValue.replacingOccurrences(of: "_", with: " "))
@@ -27,7 +27,7 @@ struct ThreadDetailView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(message.role.capitalized)
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .foregroundColor(.secondary)
                             Text(message.text ?? "")
                                 .lineLimit(5)
                         }
@@ -37,16 +37,16 @@ struct ThreadDetailView: View {
                 }
             }
             Section("Reply") {
-                TextField("Short reply", text: $reply, axis: .vertical)
-                    .lineLimit(1...4)
-                    .onChange(of: reply) { _, newValue in
+                TextField("Short reply", text: $reply)
+                    .lineLimit(4)
+                    .onChange(of: reply) { newValue in
                         if newValue.count > 500 {
                             reply = String(newValue.prefix(500))
                         }
                     }
                 Text("\(reply.count)/500")
                     .font(.caption2)
-                    .foregroundStyle(reply.count > 500 ? .red : .secondary)
+                    .foregroundColor(reply.count > 500 ? .red : .secondary)
                 Button("Send") {
                     let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
                     reply = ""
@@ -55,16 +55,23 @@ struct ThreadDetailView: View {
                 .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             Section {
-                Button("Open on Mac") {
-                    Task { await store.openSelectedOnMac() }
+                if store.summary?.capabilities.canOpenOnMac == true {
+                    Button("Open on Mac") {
+                        Task { await store.openSelectedOnMac() }
+                    }
+                } else if let reason = store.summary?.capabilities.openOnMacReason {
+                    Text(reason)
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 }
-                Button("Stop run", role: .destructive) {
+                Button("Stop run") {
                     Task { await store.stopSelectedThread() }
                 }
+                .foregroundColor(.red)
             }
             if let error = store.errorMessage {
                 Text(error)
-                    .foregroundStyle(.red)
+                    .foregroundColor(.red)
             }
         }
         .navigationTitle("Thread")

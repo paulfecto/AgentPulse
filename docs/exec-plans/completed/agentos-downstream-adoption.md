@@ -1,6 +1,6 @@
 # Execution plan
 
-Adopt AgentOS 4.8.0 as the repo-local harness adapter for AgentPulse using the clean pinned upstream worktree at `../agentOS-upstream-main`.
+Adopt AgentOS 4.8.0 as the repo-local harness adapter for AgentPulse using the clean pinned upstream worktree at `../agentOS`.
 
 ## Target behavior
 
@@ -11,7 +11,7 @@ Adopt AgentOS 4.8.0 as the repo-local harness adapter for AgentPulse using the c
 ## Inputs and constraints
 
 - User requested downstream adoption through the official AgentOS installer.
-- Use `../agentOS-upstream-main`, not dirty `../agentOS`.
+- Use `../agentOS`, not dirty `../agentOS`.
 - Keep existing AgentPulse product code untouched unless adapter verification requires repo-local harness metadata.
 - `pnpm` may be unavailable in this shell; if so, record that as an environment blocker for AgentPulse checks.
 
@@ -129,7 +129,7 @@ The following records preserve AgentPulse product source during this adapter-onl
 ## Acceptance criteria
 
 - AgentOS installer has accepted the adoption plan and generated the repo-local adapter.
-- `repo_harness.toml` points at `../agentOS-upstream-main` and the expected upstream commit.
+- `repo_harness.toml` points at `../agentOS` and the expected upstream commit.
 - AgentOS `verify_harness.py`, `verify_protocol.py`, and `verify_exec_plan.py --stage start` pass.
 - AgentPulse checks are run when `pnpm` is available, or the missing package manager is recorded clearly.
 
@@ -144,9 +144,9 @@ The following records preserve AgentPulse product source during this adapter-onl
 
 | Surface | Check | Proof |
 | --- | --- | --- |
-| AgentOS adapter | `python3 ../agentOS-upstream-main/scripts/harness/verify_harness.py --repo "$PWD"` | repo-local harness contract is valid |
-| AgentOS protocol | `python3 ../agentOS-upstream-main/scripts/harness/verify_protocol.py --repo "$PWD"` | generated state and protocol surfaces are valid |
-| Active plan | `python3 ../agentOS-upstream-main/scripts/harness/verify_exec_plan.py --repo "$PWD" --stage start` | this plan has concrete task-start content |
+| AgentOS adapter | `python3 ../agentOS/scripts/harness/verify_harness.py --repo "$PWD"` | repo-local harness contract is valid |
+| AgentOS protocol | `python3 ../agentOS/scripts/harness/verify_protocol.py --repo "$PWD"` | generated state and protocol surfaces are valid |
+| Active plan | `python3 ../agentOS/scripts/harness/verify_exec_plan.py --repo "$PWD" --stage start` | this plan has concrete task-start content |
 | AgentPulse tests | `pnpm test` | helper, tablet, and shared behavioral tests pass |
 | AgentPulse types/build | `pnpm typecheck` and `pnpm build` | TypeScript and bundle contracts compile |
 
@@ -164,7 +164,7 @@ The following records preserve AgentPulse product source during this adapter-onl
 
 ## Validation evidence
 
-- commands run: `bash ../agentOS-upstream-main/scripts/harness/install.sh --repo "$PWD" --accept-adoption-plan` succeeded; Docker AgentOS gate passed with `verify_harness.py`, `verify_protocol.py`, and `verify_exec_plan.py --stage start`; Docker product gate passed with `pnpm test`, `pnpm typecheck`, and `pnpm build` from an ephemeral copied repo.
+- commands run: `bash ../agentOS/scripts/harness/install.sh --repo "$PWD" --accept-adoption-plan` succeeded; Docker AgentOS gate passed with `verify_harness.py`, `verify_protocol.py`, and `verify_exec_plan.py --stage start`; Docker product gate passed with `pnpm test`, `pnpm typecheck`, and `pnpm build` from an ephemeral copied repo.
 - runtime proof: product runtime behavior was not changed; production build completed inside Docker.
 - remaining gaps: none for downstream adoption; runtime smoke was not started because this task only applies the adapter and product build/test/type gates passed.
 

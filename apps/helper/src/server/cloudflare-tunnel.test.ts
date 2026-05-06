@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
@@ -61,6 +61,7 @@ describe('CloudflareTunnelSupervisor', () => {
       settingsStore: createSettingsStore(),
       helperPort: settings.port,
       execFile: successfulExecFile,
+      certPath: await createCloudflaredCert(),
       spawn
     });
 
@@ -166,6 +167,7 @@ describe('CloudflareTunnelSupervisor', () => {
       settingsStore: createSettingsStore(),
       helperPort: settings.port,
       execFile: successfulExecFile,
+      certPath: await createCloudflaredCert(),
       spawn
     });
 
@@ -185,6 +187,33 @@ describe('CloudflareTunnelSupervisor', () => {
     ], expect.objectContaining({ stdio: expect.any(Array) }));
   });
 
+  it('refuses to start a stable named tunnel before Cloudflare login', async () => {
+    const settings = await createSettings({
+      enabled: true,
+      mode: 'named',
+      hostname: 'pulse.example.com',
+      publicUrl: 'https://pulse.example.com',
+      tunnelName: 'agent-pulse',
+      tunnelId: '11111111-2222-3333-4444-555555555555'
+    });
+    const spawn = vi.fn();
+    const supervisor = new CloudflareTunnelSupervisor({
+      settings,
+      settingsStore: createSettingsStore(),
+      helperPort: settings.port,
+      execFile: successfulExecFile,
+      certPath: path.join(tmpdir(), 'agent-pulse-missing-cloudflared-cert.pem'),
+      spawn
+    });
+
+    const started = await supervisor.setEnabled(true);
+
+    expect(started.status).toBe('disconnected');
+    expect(started.lastError).toBe('Run Cloudflare login before enabling a stable named tunnel.');
+    expect(started.checklist.authenticated).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it('ignores informational stderr logs for named tunnels', async () => {
     const settings = await createSettings({
       enabled: true,
@@ -200,6 +229,7 @@ describe('CloudflareTunnelSupervisor', () => {
       settingsStore: createSettingsStore(),
       helperPort: settings.port,
       execFile: successfulExecFile,
+      certPath: await createCloudflaredCert(),
       spawn: vi.fn(() => child)
     });
 
@@ -229,6 +259,7 @@ describe('CloudflareTunnelSupervisor', () => {
       settingsStore: store,
       helperPort: settings.port,
       execFile: successfulExecFile,
+      certPath: await createCloudflaredCert(),
       spawn: vi.fn(() => child)
     });
 
@@ -288,6 +319,13 @@ function createSettingsStore(): HelperSettingsStore {
     load: vi.fn(),
     save: vi.fn()
   } as unknown as HelperSettingsStore;
+}
+
+async function createCloudflaredCert(): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'agent-pulse-cloudflared-cert-'));
+  const certPath = path.join(dir, 'cert.pem');
+  await writeFile(certPath, 'fake-cloudflared-cert', 'utf8');
+  return certPath;
 }
 
 const successfulExecFile = vi.fn((

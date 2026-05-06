@@ -35,7 +35,7 @@ export class KeychainDeviceStore implements DeviceStore {
   private cacheLoad: Promise<Map<string, DeviceRecord>> | undefined;
 
   constructor(
-    private readonly service = 'com.agentpulse.helper',
+    private readonly service = process.env.AGENT_PULSE_KEYCHAIN_SERVICE?.trim() || 'com.agentpulse.helper',
     private readonly execFileCommand: ExecFileCommand = execFile,
     private readonly keychainPath: string | undefined = defaultLoginKeychainPath()
   ) {}

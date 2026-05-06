@@ -271,8 +271,22 @@ export class CloudflareTunnelSupervisor {
       return this.updateRemoteAccess({
         enabled: true,
         status: 'disconnected',
-        lastError: 'Add a Cloudflare hostname and tunnel id before enabling remote access.',
+        lastError: 'Add a Cloudflare hostname before enabling stable remote access.',
         lastCheckedAt: this.isoNow()
+      });
+    }
+
+    if (!(await this.isAuthenticated())) {
+      return this.updateRemoteAccess({
+        enabled: true,
+        status: 'disconnected',
+        lastError: 'Run Cloudflare login before enabling a stable named tunnel.',
+        lastCheckedAt: this.isoNow(),
+        checklist: {
+          ...this.settings.remoteAccess.checklist,
+          authenticated: false,
+          tunnelRunning: false
+        }
       });
     }
 

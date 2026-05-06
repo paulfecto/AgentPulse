@@ -38,13 +38,20 @@ struct WatchSummaryResponse: Decodable {
 
     struct RemoteAccess: Decodable {
         let enabled: Bool
+        let mode: String
         let status: String
         let publicUrl: String
         let hostname: String
     }
 
+    struct Capabilities: Decodable {
+        let canOpenOnMac: Bool
+        let openOnMacReason: String?
+    }
+
     let server: Server
     let remoteAccess: RemoteAccess
+    let capabilities: Capabilities
     let threads: [WatchThread]
 }
 

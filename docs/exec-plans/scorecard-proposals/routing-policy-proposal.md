@@ -1,6 +1,6 @@
 # Routing policy proposal
 
-- generated at / 생성 시각: `2026-05-05T04:45:57Z`
+- generated at / 생성 시각: `2026-05-05T13:53:21Z`
 - improvement mode / 개선 모드: `live-orchestrated`
 - current strategy / 현재 전략: `orchestrator-first`
 - minimum fresh sample size / 최소 신선 샘플 수: `3`

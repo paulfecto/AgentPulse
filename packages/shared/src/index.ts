@@ -485,9 +485,14 @@ export const WatchSummaryResponseSchema = z.object({
   }),
   remoteAccess: z.object({
     enabled: z.boolean(),
+    mode: RemoteAccessModeSchema,
     status: RemoteAccessStatusSchema,
     publicUrl: z.string(),
     hostname: z.string()
+  }),
+  capabilities: z.object({
+    canOpenOnMac: z.boolean(),
+    openOnMacReason: z.string().min(1).optional()
   }),
   threads: z.array(WatchSummaryThreadSchema).max(12)
 });

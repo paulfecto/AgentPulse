@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="agentos-ledger-template-version" content="3">
-  <meta name="agentos-ledger-fingerprint" content="7c56228a35d3973797874931da5edb5478b27fce4871377e56533b9eb386b24c">
+  <meta name="agentos-ledger-fingerprint" content="44ee8013fd114d1fea4eb4f2cae3114f554d72b77c11bcbba58f55ecd1ed5c74">
   <title>AgentOS Progress Ledger</title>
   <style>
     :root {
@@ -48,13 +48,31 @@
 <body>
   <main>
     <h1>AgentOS Progress Ledger</h1>
-    <p class="meta">Generated at 2026-05-05T04:45:57Z from the active execution plans. This ledger is an operator-visible projection of current plan state, validation evidence, TDD evidence, and review evidence. It is not a cryptographically signed audit record and does not replace the underlying execution plans.</p>
+    <p class="meta">Generated at 2026-05-06T01:39:45Z from the active execution plans. This ledger is an operator-visible projection of current plan state, validation evidence, TDD evidence, and review evidence. It is not a cryptographically signed audit record and does not replace the underlying execution plans.</p>
     <section class="summary">
-      <div class="summary-card"><span>Active plans</span><strong>1</strong></div>
+      <div class="summary-card"><span>Active plans</span><strong>4</strong></div>
       <div class="summary-card"><span>Completed plans</span><strong>0</strong></div>
-      <div class="summary-card"><span>In flight</span><strong>1</strong></div>
+      <div class="summary-card"><span>In flight</span><strong>4</strong></div>
     </section>
     <section class="cards">
+
+      <article class="card">
+        <header>
+          <h2>agentos-convergence.md</h2>
+          <span class="badge stage-validating">validating</span>
+        </header>
+        <p class="target">The official AgentOS downstream installer runs from `../agentOS` with the accepted adoption plan. The repo remains on `main`. Every harness skill materialized under `.agents/ski...</p>
+        <div class="meter"><span style="width:85%"></span></div>
+        <dl>
+          <div><dt>Layer</dt><dd>Owner: `codex` Harness-owned surfaces: repo adapter config, generated harness docs, local shared skills, Codex skill enablement config, and active execution-plan ledgers. Produc...</dd></div>
+          <div><dt>State</dt><dd>complete.</dd></div>
+          <div><dt>Ready</dt><dd>yes for the AgentOS convergence changes; this pass</dd></div>
+          <div><dt>Write set</dt><dd>`docs/exec-plans/active/agentos-convergence.md` `docs/HARNESS_CHECKLIST.md` `docs/exec-plans/active/HARNESS_PROGRESS_LEDGER.html` `docs/exec-plans/active/TEAM_PROGRESS_LEDGER.ht...</dd></div>
+          <div><dt>Validation</dt><dd>commands run: official installer/update path, `generate_repo_checklist.py`, `update_progress_ledger.sh`, Docker `verify_harness.py`, Docker `verify_protocol.py`, Docker `verify_...</dd></div>
+          <div><dt>TDD</dt><dd>red signal: first Docker harness run failed because the Python image lacked `jsonschema` for the external termination-supervisor schema reference, then plan/progress/liveness ga...</dd></div>
+          <div><dt>Review</dt><dd>reviewer: `codex` using AgentOS harness checks and targeted diff inspection. review artifact: `docs/exec-plans/active/agentos-convergence.md` unresolved findings: no blocking Ag...</dd></div>
+        </dl>
+      </article>
 
       <article class="card">
         <header>
@@ -71,6 +89,42 @@
           <div><dt>Validation</dt><dd>Docker targeted watch/helper/tablet check passed: `pnpm exec vitest run apps/helper/src/server/watch-push.test.ts apps/helper/src/server/agent-pulse-server.test.ts apps/tablet/s...</dd></div>
           <div><dt>TDD</dt><dd>red signal: first Docker targeted run exposed two regressions: the admin settings response shape test needed the new `watchNotifications` field, and the tablet had duplicate `Ch...</dd></div>
           <div><dt>Review</dt><dd>reviewer: `codex` using `.agents/skills/harness-reviewer`. one source of truth: shared schemas in `packages/shared/src/index.ts` own watch settings and summary contracts; helper...</dd></div>
+        </dl>
+      </article>
+
+      <article class="card">
+        <header>
+          <h2>real-watch-e2e.md</h2>
+          <span class="badge stage-validating">validating</span>
+        </header>
+        <p class="target">`AGENT_PULSE_DISABLE_CODEX_DESKTOP=1` prevents Codex Desktop IPC connection and blocks `/thread/open`. The helper runs on `55110` with the real bundled Codex app-server binary,...</p>
+        <div class="meter"><span style="width:85%"></span></div>
+        <dl>
+          <div><dt>Layer</dt><dd>Owner: `codex` Product layers: helper runtime guardrails, shared watch capability contract, watchOS project/scaffold, and runtime validation evidence. Runtime boundary: helper c...</dd></div>
+          <div><dt>State</dt><dd>complete-with-apple-membership-blocker.</dd></div>
+          <div><dt>Ready</dt><dd>yes for checked-in helper/watch runtime changes;</dd></div>
+          <div><dt>Write set</dt><dd>`docs/exec-plans/active/real-watch-e2e.md` `docs/exec-plans/active/HARNESS_PROGRESS_LEDGER.html` `docs/exec-plans/active/TEAM_PROGRESS_LEDGER.html` `docs/exec-plans/active/WORKI...</dd></div>
+          <div><dt>Validation</dt><dd>commands run: Docker targeted helper/shared/settings/auth tests; Docker `pnpm test`; Docker `pnpm typecheck`; Docker `pnpm build`; helper runtime health/process/API probes; Xcod...</dd></div>
+          <div><dt>TDD</dt><dd>red signal: targeted tests and runtime probes initially exposed missing desktop-disabled guardrails and Watch build/toolchain compatibility issues. red artifact: failing Docker...</dd></div>
+          <div><dt>Review</dt><dd>reviewer: `codex` using AgentOS execution-plan validation and targeted diff inspection. one source of truth: helper owns runtime state and Codex transport; shared schemas own wa...</dd></div>
+        </dl>
+      </article>
+
+      <article class="card">
+        <header>
+          <h2>watch-global-runtime.md</h2>
+          <span class="badge stage-validating">validating</span>
+        </header>
+        <p class="target">The Watch app has a real app icon and in-app logo based on the existing Agent Pulse mark in `apps/tablet/public/icon.svg`. Remote access settings clearly distinguish temporary q...</p>
+        <div class="meter"><span style="width:85%"></span></div>
+        <dl>
+          <div><dt>Layer</dt><dd>Owner: `codex` Product layers: Watch app assets/UI, helper Cloudflare supervisor, tablet settings UI, and host runtime launcher. Runtime boundary: helper talks to real Codex app...</dd></div>
+          <div><dt>State</dt><dd>complete-with-external-blockers.</dd></div>
+          <div><dt>Ready</dt><dd>code and validation are ready for review; global</dd></div>
+          <div><dt>Write set</dt><dd>`docs/exec-plans/active/watch-global-runtime.md` `packages/shared/src/index.ts` `apps/helper/src/server/agent-pulse-server.ts` `apps/helper/src/server/agent-pulse-server.test.ts...</dd></div>
+          <div><dt>Validation</dt><dd>commands run: `git -C ../agentOS fetch origin main --prune`; `git -C ../agentOS pull --ff-only origin main`; `bash ../agentOS/scripts/harness/install.sh --repo &quot;$PWD&quot; --accept-a...</dd></div>
+          <div><dt>TDD</dt><dd>red signal: the first targeted Docker run exposed missing named-tunnel login fixture setup for the new Cloudflare preflight expectations; the first full Docker test copy also ex...</dd></div>
+          <div><dt>Review</dt><dd>reviewer: `codex` using AgentOS harness checks plus targeted diff inspection of Cloudflare supervisor, tablet settings, shared schema, Watch SwiftUI, asset catalog, and launcher...</dd></div>
         </dl>
       </article>
     </section>

@@ -4,13 +4,15 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>Agent Pulse</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.paulfecto.AgentPulse.watchkitapp</string>
+	<key>AgentPulseRemoteNotificationsEnabled</key>
+	<true/>
 	<key>WKApplication</key>
 	<true/>
 	<key>WKWatchOnly</key>
-	<true/>
-	<key>WKRunsIndependentlyOfCompanionApp</key>
 	<true/>
 </dict>
 </plist>
