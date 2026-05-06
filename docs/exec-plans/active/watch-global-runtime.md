@@ -63,6 +63,10 @@ Codex-safe remote runtime.
 - `docker-compose.macmini3.yml`
 - `deploy/macmini3/agentpulse-nginx.conf`
 - `deploy/macmini3/beta-shared-edge-agentpulse.conf`
+- `.github/workflows/agentpulse-beta.yml`
+- `scripts/ci/run_agentpulse_beta_deploy.sh`
+- `scripts/macmini3/deploy-agentpulse-beta.sh`
+- `scripts/macmini3/reconcile-agentpulse-shared-edge.sh`
 - `docs/deploy/macmini3-agent-pulse-beta.md`
 - `scripts/macmini3/run-agentpulse-beta-helper.sh`
 - `scripts/macmini3/check-agentpulse-beta.sh`
@@ -228,6 +232,33 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
   Watch contract including `remoteAccess.mode`, and the helper recorded the
   Watch device `lastSeenAt = 2026-05-06T01:33:18.711Z`.
 
+- Agent Pulse-owned macmini3 deploy automation, 2026-05-06:
+  - added `.github/workflows/agentpulse-beta.yml`,
+    `scripts/ci/run_agentpulse_beta_deploy.sh`,
+    `scripts/macmini3/deploy-agentpulse-beta.sh`, and
+    `scripts/macmini3/reconcile-agentpulse-shared-edge.sh`.
+  - the deploy path checks out `paulfecto/AgentPulse` on `main` at the exact
+    pushed SHA, builds with `AGENT_PULSE_PUBLIC_BASE_PATH=/agent-pulse/`,
+    starts only `agentpulse-beta-edge`, refreshes only the Agent Pulse beta
+    LaunchAgent, and inserts only the marked Agent Pulse nginx block for
+    `/agent-pulse`.
+  - preflight proof before code change: `https://beta.dope-ai.kr/project-manager/health`
+    and `https://beta.dope-ai.kr/health` returned `healthy`;
+    `https://beta.dope-ai.kr/agent-pulse/health/get` still returned Project
+    Manager HTML, confirming the live shared-edge route has not yet been
+    reconciled.
+  - validation passed: `bash -n` for all macmini/CI shell scripts,
+    `git diff --check`, `docker compose -f docker-compose.macmini3.yml config`,
+    `docker run --rm --add-host=host.docker.internal:host-gateway -v
+    "$PWD/deploy/macmini3/agentpulse-nginx.conf:/etc/nginx/conf.d/default.conf:ro"
+    nginx:1.27-alpine nginx -t`, Docker targeted Vitest for deploy scripts, and
+    Docker full `pnpm test` (35 files, 467 tests), `pnpm typecheck`, and
+    `pnpm build`.
+  - live deploy blocker: `gh secret list --repo paulfecto/AgentPulse` returned
+    no repo secrets. Existing macmini3 secrets are present on the management
+    tool repo, but GitHub secrets cannot be read back or mirrored without the
+    original secret values.
+
 ## TDD evidence
 
 - red signal: the first targeted Docker run exposed missing named-tunnel login
@@ -245,6 +276,9 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
   artifact retained.
 - refactor verification: `git diff --check` passed and AgentOS harness/protocol
   checks passed after the AgentOS 4.12.2 update.
+- deploy automation TDD, 2026-05-06: targeted Docker Vitest first failed on an
+  over-specific docs assertion, then passed after matching the wrapped
+  validation-failure sentence. Full Docker repo gates passed after that.
 
 ## Review evidence
 
@@ -258,14 +292,16 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
 - review artifact:
   `docs/exec-plans/active/review-cycles/watch-global-runtime/cycle-002/review-verdict.md`
 - unresolved findings: no blocking code findings from local review. External
-  blockers remain macmini3 shared-edge mutation authority and APNs key material.
+  blockers remain AgentPulse GitHub macmini3 deploy secrets and APNs key
+  material.
 
 ## Completion status
 
-- state: repo-complete-with-external-deploy-blocker.
-- ready for merge or deploy: code and validation are ready for review; macmini3
-  launch requires applying the shared edge route and starting the Docker edge on
-  macmini3. APNs proof still requires Apple APNs secrets.
+- state: repo-complete-with-external-secret-blocker.
+- ready for merge or deploy: code and validation are ready. The live macmini3
+  deploy can run as soon as `MACMINI3_HOST`, `MACMINI3_USER`, `MACMINI3_PORT`,
+  and `MACMINI3_PASSWORD` are available in the AgentPulse GitHub repo. APNs
+  proof still requires Apple APNs secrets.
 
 ## Frontier routing
 

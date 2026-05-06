@@ -1,0 +1,44 @@
+name: Agent Pulse Beta
+run-name: Agent Pulse beta deploy
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: agentpulse-beta-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AGENT_PULSE_PUBLIC_URL: https://beta.dope-ai.kr/agent-pulse
+  AGENT_PULSE_PUBLIC_BASE_PATH: /agent-pulse/
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy Agent Pulse beta to macmini3
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  deploy-beta:
+    if: github.ref == 'refs/heads/main' && github.event.inputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: beta
+      url: https://beta.dope-ai.kr/agent-pulse
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Deploy to macmini3
+        env:
+          MACMINI3_HOST: ${{ secrets.MACMINI3_HOST }}
+          MACMINI3_USER: ${{ secrets.MACMINI3_USER }}
+          MACMINI3_PORT: ${{ secrets.MACMINI3_PORT }}
+          MACMINI3_PASSWORD: ${{ secrets.MACMINI3_PASSWORD }}
+        run: bash scripts/ci/run_agentpulse_beta_deploy.sh

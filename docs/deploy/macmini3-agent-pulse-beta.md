@@ -21,17 +21,49 @@ reverse-proxies to the macOS host helper on `127.0.0.1:55110`.
 
 ## macmini3 commands
 
-From the Agent Pulse checkout on macmini3:
+The normal deploy path is the Agent Pulse-owned GitHub Actions workflow:
 
-```sh
-AGENT_PULSE_PUBLIC_BASE_PATH=/agent-pulse/ pnpm build
-docker compose -f docker-compose.macmini3.yml up -d
-scripts/macmini3/run-agentpulse-beta-helper.sh
+```text
+Agent Pulse Beta -> Run workflow -> deploy = true
 ```
 
-Install the shared-edge route by including
-`deploy/macmini3/beta-shared-edge-agentpulse.conf` in the existing
-`beta.dope-ai.kr` nginx server block, then reload that shared edge.
+The workflow uses the same macmini3 secret model as the shared beta stack:
+
+- `MACMINI3_HOST`
+- `MACMINI3_USER`
+- `MACMINI3_PORT`
+- `MACMINI3_PASSWORD`
+
+It checks out `paulfecto/AgentPulse` on macmini3 at the exact pushed `main`
+SHA, builds with `/agent-pulse/`, starts only `agentpulse-beta-edge`, refreshes
+only the Agent Pulse helper LaunchAgent, and reconciles only the marked Agent
+Pulse block inside the active `beta.dope-ai.kr` shared nginx edge.
+
+For direct host operation from the Agent Pulse checkout on macmini3:
+
+```sh
+scripts/macmini3/deploy-agentpulse-beta.sh "$(git rev-parse HEAD)"
+```
+
+The deploy script refuses to touch the shared edge unless
+`https://beta.dope-ai.kr/project-manager/health` and
+`https://beta.dope-ai.kr/health` are healthy first. It validates nginx with
+`nginx -t` before reload and restores the previous shared-edge config if
+validation fails.
+
+`deploy/macmini3/beta-shared-edge-agentpulse.conf` is a reference snippet only.
+Live deployment uses `scripts/macmini3/reconcile-agentpulse-shared-edge.sh`,
+which inserts or updates the marked block:
+
+```nginx
+# Agent Pulse beta app proxy BEGIN
+...
+# Agent Pulse beta app proxy END
+```
+
+The reconciler preserves existing `/project-manager`, `/health`, `/api`, MCP,
+and OAuth routes. It uses `http://127.0.0.1:4355/` for host nginx and
+`http://host.docker.internal:4355/` when the shared edge runs inside Docker.
 
 Validate:
 

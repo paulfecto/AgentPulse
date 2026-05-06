@@ -109,6 +109,11 @@ await mkdir(path.dirname(settingsPath), { recursive: true });
 await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
 NODE
 
+if [[ "${AGENT_PULSE_WRITE_SETTINGS_ONLY:-0}" == "1" ]]; then
+  log "Wrote beta helper settings at $settings_path"
+  exit 0
+fi
+
 if [[ "${AGENT_PULSE_SKIP_BUILD:-0}" != "1" ]]; then
   log "Building with public base path $public_base_path"
   (cd "$repo_root" && AGENT_PULSE_PUBLIC_BASE_PATH="$public_base_path" pnpm build)
