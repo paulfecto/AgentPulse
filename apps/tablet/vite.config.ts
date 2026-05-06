@@ -83,15 +83,26 @@ function remoteHmrConfig():
   };
 }
 
+function publicBasePath(): string {
+  const raw = (process.env.AGENT_PULSE_PUBLIC_BASE_PATH ?? '').trim();
+  if (!raw || raw === '/') {
+    return '/';
+  }
+  const withLeadingSlash = raw.startsWith('/') ? raw : `/${raw}`;
+  return withLeadingSlash.endsWith('/') ? withLeadingSlash : `${withLeadingSlash}/`;
+}
+
 const helperApiTarget = helperTarget();
 const allowedHosts = remoteAllowedHosts();
 const hmr = remoteHmrConfig();
+const base = publicBasePath();
 const helperProxy = {
   target: helperApiTarget,
   changeOrigin: true
 };
 
 export default defineConfig({
+  base,
   plugins: [
     react(),
     VitePWA({
@@ -105,6 +116,8 @@ export default defineConfig({
         theme_color: '#10131f',
         background_color: '#10131f',
         display: 'standalone',
+        scope: base,
+        start_url: base,
         icons: [
           {
             src: 'icon.svg',

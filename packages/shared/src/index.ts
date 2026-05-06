@@ -77,7 +77,7 @@ export const HelperHealthSchema = z.object({
     .object({
       enabled: z.boolean(),
       provider: z.literal('cloudflare'),
-      mode: z.enum(['quick', 'named']).default('quick'),
+      mode: z.enum(['quick', 'named', 'edge']).default('quick'),
       status: z.enum(['off', 'starting', 'healthy', 'degraded', 'disconnected']),
       publicUrl: z.string(),
       hostname: z.string(),
@@ -121,7 +121,7 @@ export const RemoteAccessStatusSchema = z.enum([
 
 export type RemoteAccessStatus = z.infer<typeof RemoteAccessStatusSchema>;
 
-export const RemoteAccessModeSchema = z.enum(['quick', 'named']);
+export const RemoteAccessModeSchema = z.enum(['quick', 'named', 'edge']);
 
 export type RemoteAccessMode = z.infer<typeof RemoteAccessModeSchema>;
 

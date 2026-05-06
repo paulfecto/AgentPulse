@@ -30,6 +30,7 @@ export type RemoteAccessConfigureInput = {
   mode?: RemoteAccessMode;
   tunnelProtocol?: RemoteAccessProtocol;
   hostname?: string;
+  publicUrl?: string;
   tunnelName?: string;
 };
 
@@ -74,6 +75,10 @@ export class CloudflareTunnelSupervisor {
 
   async check(): Promise<RemoteAccessSettings> {
     const mode = this.remoteMode();
+    if (mode === 'edge') {
+      return this.checkSharedEdge();
+    }
+
     const dependencyInstalled = await this.isCloudflaredInstalled();
     const authenticated = mode === 'quick' ? dependencyInstalled : await this.isAuthenticated();
     const configured = dependencyInstalled && this.isConfigured();
@@ -107,6 +112,13 @@ export class CloudflareTunnelSupervisor {
   }
 
   async login(): Promise<RemoteAccessSettings> {
+    if (this.remoteMode() === 'edge') {
+      return this.updateRemoteAccess({
+        lastError: 'Cloudflare login is not needed for the shared beta edge.',
+        lastCheckedAt: this.isoNow()
+      });
+    }
+
     if (this.remoteMode() === 'quick') {
       return this.updateRemoteAccess({
         lastError: 'Cloudflare login is not needed for a temporary Cloudflare URL.',
@@ -148,6 +160,30 @@ export class CloudflareTunnelSupervisor {
         checklist: {
           ...this.settings.remoteAccess.checklist,
           hostnameAssigned: false
+        }
+      });
+      return this.check();
+    }
+
+    if (mode === 'edge') {
+      const publicUrl = normalizePublicUrl(input.publicUrl ?? this.settings.remoteAccess.publicUrl);
+      const hostname = normalizeHostname(input.hostname || hostnameFromUrl(publicUrl) || this.settings.remoteAccess.hostname);
+      await this.updateRemoteAccess({
+        mode,
+        tunnelProtocol,
+        ...(typeof input.enabled === 'boolean' ? { enabled: input.enabled } : {}),
+        hostname,
+        publicUrl,
+        tunnelName: normalizeTunnelName(input.tunnelName ?? this.settings.remoteAccess.tunnelName),
+        tunnelId: '',
+        lastCheckedAt: this.isoNow(),
+        lastError: publicUrl ? '' : 'Configure the shared beta public URL before enabling remote access.',
+        checklist: {
+          dependencyInstalled: true,
+          authenticated: true,
+          configured: Boolean(publicUrl),
+          tunnelRunning: Boolean(this.settings.remoteAccess.enabled && publicUrl),
+          hostnameAssigned: Boolean(publicUrl)
         }
       });
       return this.check();
@@ -204,7 +240,7 @@ export class CloudflareTunnelSupervisor {
 
   async writeConfig(): Promise<void> {
     const remote = this.settings.remoteAccess;
-    if (this.remoteMode() === 'quick') {
+    if (this.remoteMode() === 'quick' || this.remoteMode() === 'edge') {
       return;
     }
 
@@ -228,6 +264,25 @@ export class CloudflareTunnelSupervisor {
   }
 
   async setEnabled(enabled: boolean): Promise<RemoteAccessSettings> {
+    if (this.remoteMode() === 'edge') {
+      const configured = this.isConfigured();
+      return this.updateRemoteAccess({
+        enabled,
+        status: enabled ? (configured ? 'healthy' : 'disconnected') : 'off',
+        lastError: enabled && !configured ? 'Configure the shared beta public URL before enabling remote access.' : '',
+        lastStartedAt: enabled ? this.isoNow() : this.settings.remoteAccess.lastStartedAt,
+        lastStoppedAt: enabled ? this.settings.remoteAccess.lastStoppedAt : this.isoNow(),
+        lastCheckedAt: this.isoNow(),
+        checklist: {
+          dependencyInstalled: true,
+          authenticated: true,
+          configured,
+          tunnelRunning: enabled && configured,
+          hostnameAssigned: configured
+        }
+      });
+    }
+
     if (!enabled) {
       this.stopChild();
       const patch: Partial<RemoteAccessSettings> = {
@@ -504,6 +559,9 @@ export class CloudflareTunnelSupervisor {
     if (this.remoteMode() === 'quick') {
       return true;
     }
+    if (this.remoteMode() === 'edge') {
+      return Boolean(remote.hostname.trim() && remote.publicUrl.trim());
+    }
     return Boolean(remote.hostname.trim() && remote.publicUrl.trim() && remote.tunnelName.trim());
   }
 
@@ -531,7 +589,27 @@ export class CloudflareTunnelSupervisor {
   }
 
   private remoteMode(): RemoteAccessMode {
+    if (this.settings.remoteAccess.mode === 'edge') {
+      return 'edge';
+    }
     return this.settings.remoteAccess.mode === 'named' ? 'named' : 'quick';
+  }
+
+  private async checkSharedEdge(): Promise<RemoteAccessSettings> {
+    const configured = this.isConfigured();
+    const enabled = this.settings.remoteAccess.enabled;
+    return this.updateRemoteAccess({
+      status: enabled ? (configured ? 'healthy' : 'disconnected') : 'off',
+      lastCheckedAt: this.isoNow(),
+      lastError: configured ? '' : 'Configure the shared beta public URL before enabling remote access.',
+      checklist: {
+        dependencyInstalled: true,
+        authenticated: true,
+        configured,
+        tunnelRunning: enabled && configured,
+        hostnameAssigned: configured
+      }
+    });
   }
 }
 
@@ -549,6 +627,9 @@ function normalizeTunnelName(value: string): string {
 }
 
 function normalizeRemoteMode(value: RemoteAccessMode | string | undefined): RemoteAccessMode {
+  if (value === 'edge') {
+    return 'edge';
+  }
   return value === 'named' ? 'named' : 'quick';
 }
 
@@ -576,6 +657,22 @@ function parseTryCloudflareUrl(value: string): string {
 function hostnameFromUrl(value: string): string {
   try {
     return new URL(value).hostname;
+  } catch {
+    return '';
+  }
+}
+
+function normalizePublicUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+  try {
+    const parsed = new URL(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
+    parsed.protocol = 'https:';
+    parsed.hash = '';
+    parsed.search = '';
+    return parsed.toString().replace(/\/+$/, '');
   } catch {
     return '';
   }

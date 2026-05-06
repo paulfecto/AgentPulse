@@ -905,6 +905,73 @@ describe('Agent Pulse helper API', () => {
     }
   });
 
+  it('returns path-prefixed shared edge URL in watch summary and pairing lookup', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: false,
+      remoteAccess: remoteAccessSettings({
+        enabled: true,
+        mode: 'edge',
+        status: 'healthy',
+        hostname: 'beta.dope-ai.kr',
+        publicUrl: 'https://beta.dope-ai.kr/agent-pulse',
+        checklist: {
+          dependencyInstalled: true,
+          authenticated: true,
+          configured: true,
+          tunnelRunning: true,
+          hostnameAssigned: true
+        }
+      })
+    };
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore: { save: vi.fn(), load: vi.fn() } as unknown as HelperSettingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: { listThreads: async () => [] },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      desktopControlDisabled: true,
+      version: '0.1.0'
+    });
+
+    try {
+      const lookupPin = pairing.createPin();
+      const lookup = await fetch(`${server.url}/pair/lookup/${lookupPin.pin}`);
+      await expect(lookup.json()).resolves.toMatchObject({
+        baseUrl: 'https://beta.dope-ai.kr/agent-pulse'
+      });
+
+      const paired = await pairForTest(server.url, pairing);
+      const response = await fetch(`${server.url}/watch/summary`, {
+        headers: authHeaders(paired.token, paired.deviceId)
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        server: {
+          remoteUrl: 'https://beta.dope-ai.kr/agent-pulse'
+        },
+        remoteAccess: {
+          enabled: true,
+          mode: 'edge',
+          status: 'healthy',
+          publicUrl: 'https://beta.dope-ai.kr/agent-pulse',
+          hostname: 'beta.dope-ai.kr'
+        },
+        capabilities: {
+          canOpenOnMac: false
+        }
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('marks desktop-open capability unavailable in desktop-disabled mode', async () => {
     const registry = new DeviceRegistry(new MemoryDeviceStore());
     const pairing = new PairingManager(registry);

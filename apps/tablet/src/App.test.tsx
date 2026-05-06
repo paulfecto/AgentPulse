@@ -1184,7 +1184,7 @@ describe('Agent Pulse tablet UI', () => {
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Remote access' })).toBeInTheDocument();
     expect(screen.getByText('Install cloudflared first.')).toBeInTheDocument();
-    expect(screen.getByText('Use a Cloudflare Tunnel. Stable hostname mode is required for Apple Watch access away from this network.')).toBeInTheDocument();
+    expect(screen.getByText('Use Cloudflare Tunnel or the shared beta edge so Apple Watch can reach Agent Pulse away from this network.')).toBeInTheDocument();
     expect(screen.getByLabelText('Tunnel mode')).toHaveValue('quick');
     expect(screen.getByLabelText('Tunnel protocol')).toHaveValue('auto');
     expect(screen.getByTitle(/Auto lets Cloudflare choose/)).toBeInTheDocument();
@@ -1314,6 +1314,119 @@ describe('Agent Pulse tablet UI', () => {
 
     await waitFor(() =>
       expect(screen.getByText('https://pulse.watch.example.com')).toBeInTheDocument()
+    );
+  });
+
+  it('configures shared beta edge mode in admin settings', async () => {
+    sessionStorage.setItem('agent-pulse-admin-token', 'admin-token');
+    window.location.hash = '#/settings';
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/health/get') {
+        return {
+          ok: true,
+          json: async () => ({
+            status: 'ok',
+            codexAppServer: 'connected',
+            version: '0.1.0',
+            uptimeSec: 60
+          })
+        };
+      }
+
+      if (url === '/settings/get') {
+        return {
+          ok: true,
+          json: async () => ({
+            settings: {
+              lanEnabled: false,
+              mobileSendEnabled: false,
+              remoteAccess: {
+                enabled: false,
+                provider: 'cloudflare',
+                mode: 'edge',
+                tunnelProtocol: 'auto',
+                hostname: 'beta.dope-ai.kr',
+                publicUrl: 'https://beta.dope-ai.kr/agent-pulse',
+                tunnelName: 'agent-pulse',
+                tunnelId: '',
+                configPath: '/tmp/config.yml',
+                metricsUrl: 'http://127.0.0.1:60123/metrics',
+                status: 'healthy',
+                lastError: '',
+                lastStartedAt: null,
+                lastStoppedAt: null,
+                lastCheckedAt: '2026-05-06T10:00:00Z',
+                checklist: {
+                  dependencyInstalled: true,
+                  authenticated: true,
+                  configured: true,
+                  tunnelRunning: true,
+                  hostnameAssigned: true
+                }
+              }
+            },
+            devices: [],
+            pairingPins: []
+          })
+        };
+      }
+
+      if (url === '/settings/remote-access/cloudflare/configure') {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          mode: 'edge',
+          hostname: 'beta.dope-ai.kr',
+          publicUrl: 'https://beta.dope-ai.kr/agent-pulse'
+        });
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            remoteAccess: {
+              enabled: false,
+              provider: 'cloudflare',
+              mode: 'edge',
+              tunnelProtocol: 'auto',
+              hostname: 'beta.dope-ai.kr',
+              publicUrl: 'https://beta.dope-ai.kr/agent-pulse',
+              tunnelName: 'agent-pulse',
+              tunnelId: '',
+              configPath: '/tmp/config.yml',
+              metricsUrl: 'http://127.0.0.1:60123/metrics',
+              status: 'healthy',
+              lastError: '',
+              lastStartedAt: null,
+              lastStoppedAt: null,
+              lastCheckedAt: '2026-05-06T10:00:00Z',
+              checklist: {
+                dependencyInstalled: true,
+                authenticated: true,
+                configured: true,
+                tunnelRunning: true,
+                hostnameAssigned: true
+              }
+            }
+          })
+        };
+      }
+
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Remote access' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Tunnel mode')).toHaveValue('edge');
+    expect(screen.getByLabelText('Public hostname')).toHaveValue('beta.dope-ai.kr');
+    expect(screen.getByLabelText('Public Watch URL')).toHaveValue('https://beta.dope-ai.kr/agent-pulse');
+    expect(screen.queryByLabelText('Tunnel protocol')).not.toBeInTheDocument();
+    expect(screen.getByText('Shared beta Watch URL')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure edge' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/settings/remote-access/cloudflare/configure', expect.any(Object))
     );
   });
 

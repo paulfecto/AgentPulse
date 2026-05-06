@@ -1,0 +1,1 @@
+{"task_id": "watch-global-runtime", "root_id": "watch-global-runtime-cert-root", "candidate_tree_sha": "578f85404ab36b6c10956d50e3e8bca492e29211b32050b5bcf2f582a957968a", "lane": "codex", "role": "verifier", "namespace": "release-watcher", "readonly": true, "created_at": "2026-05-06T02:40:04Z", "status": "healthy"}

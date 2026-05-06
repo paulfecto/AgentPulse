@@ -132,6 +132,36 @@ describe('shared schemas', () => {
     expect(settings.checklist.dependencyInstalled).toBe(false);
   });
 
+  it('validates shared edge remote access settings with a path-prefixed public URL', () => {
+    const settings = RemoteAccessSettingsSchema.parse({
+      enabled: true,
+      provider: 'cloudflare',
+      mode: 'edge',
+      tunnelProtocol: 'auto',
+      hostname: 'beta.dope-ai.kr',
+      publicUrl: 'https://beta.dope-ai.kr/agent-pulse',
+      tunnelName: 'agent-pulse',
+      tunnelId: '',
+      configPath: '/Users/me/Library/Application Support/Agent Pulse Beta/edge/config.yml',
+      metricsUrl: 'http://127.0.0.1:60123/metrics',
+      status: 'healthy',
+      lastError: '',
+      lastStartedAt: null,
+      lastStoppedAt: null,
+      lastCheckedAt: '2026-05-06T10:00:00Z',
+      checklist: {
+        dependencyInstalled: true,
+        authenticated: true,
+        configured: true,
+        tunnelRunning: true,
+        hostnameAssigned: true
+      }
+    });
+
+    expect(settings.mode).toBe('edge');
+    expect(settings.publicUrl).toBe('https://beta.dope-ai.kr/agent-pulse');
+  });
+
   it('masks tokens without printing the full secret', () => {
     expect(maskToken('tok_1234567890abcdef')).toBe('tok_...cdef');
   });

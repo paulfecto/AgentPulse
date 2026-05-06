@@ -120,6 +120,16 @@ export class AgentPulseApiError extends Error {
 const sessionKey = 'agent-pulse-session';
 const fingerprintKey = 'agent-pulse-fingerprint';
 const adminTokenKey = 'agent-pulse-admin-token';
+const publicBasePath =
+  (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/';
+
+function apiPath(path: string): string {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const normalizedBase = publicBasePath.endsWith('/')
+    ? publicBasePath.slice(0, -1)
+    : publicBasePath;
+  return normalizedBase ? `${normalizedBase}${cleanPath}` : cleanPath;
+}
 
 export function loadAdminToken(): string | undefined {
   return sessionStorage.getItem(adminTokenKey) ?? undefined;
@@ -134,7 +144,7 @@ export function clearAdminToken(): void {
 }
 
 export async function adminLogin(passcode: string): Promise<string> {
-  const response = await fetch('/admin/login', {
+  const response = await fetch(apiPath('/admin/login'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ passcode })
@@ -152,7 +162,7 @@ export async function adminLogin(passcode: string): Promise<string> {
 }
 
 export async function adminLogout(token: string): Promise<void> {
-  await fetch('/admin/logout', {
+  await fetch(apiPath('/admin/logout'), {
     method: 'POST',
     headers: { authorization: `Bearer ${token}` }
   });
@@ -179,7 +189,7 @@ export async function checkRemoteAccess(token: string): Promise<RemoteAccessSett
 
 export async function updateRemoteAccess(
   token: string,
-  input: { enabled?: boolean; mode?: RemoteAccessSettings['mode']; tunnelProtocol?: RemoteAccessSettings['tunnelProtocol']; hostname?: string; tunnelName?: string }
+  input: { enabled?: boolean; mode?: RemoteAccessSettings['mode']; tunnelProtocol?: RemoteAccessSettings['tunnelProtocol']; hostname?: string; publicUrl?: string; tunnelName?: string }
 ): Promise<RemoteAccessSettings> {
   return remoteAccessPost('/settings/remote-access', token, input);
 }
@@ -214,7 +224,7 @@ export async function updateEnabledProviders(
 
 export async function configureCloudflareRemoteAccess(
   token: string,
-  input: { mode?: RemoteAccessSettings['mode']; tunnelProtocol?: RemoteAccessSettings['tunnelProtocol']; hostname?: string; tunnelName?: string }
+  input: { mode?: RemoteAccessSettings['mode']; tunnelProtocol?: RemoteAccessSettings['tunnelProtocol']; hostname?: string; publicUrl?: string; tunnelName?: string }
 ): Promise<RemoteAccessSettings> {
   return remoteAccessPost('/settings/remote-access/cloudflare/configure', token, input);
 }
@@ -226,7 +236,7 @@ export async function loginCloudflareRemoteAccess(token: string): Promise<Remote
 async function remoteAccessPost(
   url: string,
   token: string,
-  body?: { enabled?: boolean; mode?: RemoteAccessSettings['mode']; tunnelProtocol?: RemoteAccessSettings['tunnelProtocol']; hostname?: string; tunnelName?: string }
+  body?: { enabled?: boolean; mode?: RemoteAccessSettings['mode']; tunnelProtocol?: RemoteAccessSettings['tunnelProtocol']; hostname?: string; publicUrl?: string; tunnelName?: string }
 ): Promise<RemoteAccessSettings> {
   const response = await adminFetch(url, token, {
     method: 'POST',
@@ -267,7 +277,7 @@ export function adminFetch(url: string, token: string | undefined, init: Request
   if (init.body && !isFormDataBody(init.body)) {
     headers.set('content-type', 'application/json');
   }
-  return fetch(url, { ...init, headers });
+  return fetch(apiPath(url), { ...init, headers });
 }
 
 export function loadSession(): AgentPulseSession | undefined {
@@ -318,12 +328,12 @@ function createBrowserId(): string {
 }
 
 export async function fetchHealth(signal?: AbortSignal): Promise<HelperHealth> {
-  const response = await fetch('/health/get', { signal });
+  const response = await fetch(apiPath('/health/get'), { signal });
   return HelperHealthSchema.parse(await response.json());
 }
 
 export async function fetchPairingDevices(): Promise<PairingDeviceOption[]> {
-  const response = await fetch('/device/options');
+  const response = await fetch(apiPath('/device/options'));
   if (!response.ok) {
     throw new Error('Could not load saved devices.');
   }
@@ -337,7 +347,7 @@ export async function pairDevice(input: {
   existingDeviceId?: string;
   fingerprint: string;
 }): Promise<{ token: string; deviceId: string; deviceName: string }> {
-  const response = await fetch('/device/pair', {
+  const response = await fetch(apiPath('/device/pair'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input)
@@ -353,7 +363,7 @@ export async function pairDevice(input: {
 export async function recoverDeviceSession(
   session: AgentPulseSession
 ): Promise<{ token: string; deviceId: string; deviceName: string }> {
-  const response = await fetch('/device/session/recover', {
+  const response = await fetch(apiPath('/device/session/recover'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -946,7 +956,7 @@ export function liveEventsUrl(session: AgentPulseSession): string {
     deviceId: session.deviceId,
     fingerprint: session.fingerprint
   });
-  return `${protocol}//${window.location.host}/events?${params.toString()}`;
+  return `${protocol}//${window.location.host}${apiPath('/events')}?${params.toString()}`;
 }
 
 async function authedFetch(
@@ -962,7 +972,7 @@ async function authedFetch(
     headers.set('content-type', 'application/json');
   }
 
-  return fetch(url, {
+  return fetch(apiPath(url), {
     ...init,
     headers
   });

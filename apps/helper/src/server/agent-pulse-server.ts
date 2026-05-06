@@ -344,7 +344,7 @@ export type AgentPulseServerOptions = {
 export type RemoteAccessController = {
   getStatus(): RemoteAccessSettings;
   check(): Promise<RemoteAccessSettings>;
-  configure(input: { enabled?: boolean; mode?: RemoteAccessMode; tunnelProtocol?: RemoteAccessProtocol; hostname?: string; tunnelName?: string }): Promise<RemoteAccessSettings>;
+  configure(input: { enabled?: boolean; mode?: RemoteAccessMode; tunnelProtocol?: RemoteAccessProtocol; hostname?: string; publicUrl?: string; tunnelName?: string }): Promise<RemoteAccessSettings>;
   setEnabled(enabled: boolean): Promise<RemoteAccessSettings>;
   login(): Promise<RemoteAccessSettings>;
 };
@@ -1415,22 +1415,14 @@ function createApp(
       mode?: RemoteAccessMode;
       tunnelProtocol?: unknown;
       hostname?: string;
+      publicUrl?: string;
       tunnelName?: string;
     };
     const tunnelProtocol = RemoteAccessProtocolSchema.catch('auto').parse(body.tunnelProtocol);
     let remoteAccess = currentSettings.remoteAccess;
-    if (body.mode !== undefined || body.tunnelProtocol !== undefined || body.hostname !== undefined || body.tunnelName !== undefined) {
+    if (body.mode !== undefined || body.tunnelProtocol !== undefined || body.hostname !== undefined || body.publicUrl !== undefined || body.tunnelName !== undefined) {
       remoteAccess = await (options.remoteAccess?.configure({ ...body, tunnelProtocol }) ??
-        Promise.resolve({
-          ...remoteAccess,
-          ...(body.mode !== undefined ? { mode: body.mode === 'named' ? 'named' : 'quick' } : {}),
-          ...(body.tunnelProtocol !== undefined ? { tunnelProtocol } : {}),
-          ...(body.mode === 'quick' ? { hostname: '', publicUrl: '' } : {}),
-          ...(body.hostname !== undefined
-            ? { hostname: normalizeHostname(body.hostname), publicUrl: publicUrlForHostname(body.hostname) }
-            : {}),
-          ...(body.tunnelName !== undefined ? { tunnelName: body.tunnelName.trim() || 'agent-pulse' } : {})
-        }));
+        Promise.resolve(remoteAccessPatch(remoteAccess, { ...body, tunnelProtocol })));
     }
     if (typeof body.enabled === 'boolean') {
       remoteAccess = await (options.remoteAccess?.setEnabled(body.enabled) ??
@@ -1465,6 +1457,7 @@ function createApp(
       mode?: RemoteAccessMode;
       tunnelProtocol?: unknown;
       hostname?: string;
+      publicUrl?: string;
       tunnelName?: string;
     };
     const remoteAccess = await (options.remoteAccess?.configure({
@@ -5627,6 +5620,87 @@ function normalizeHostname(value: string | undefined): string {
 function publicUrlForHostname(value: string | undefined): string {
   const hostname = normalizeHostname(value);
   return hostname ? `https://${hostname}` : '';
+}
+
+function normalizeRemoteMode(value: RemoteAccessMode | string | undefined): RemoteAccessMode {
+  if (value === 'edge') {
+    return 'edge';
+  }
+  return value === 'named' ? 'named' : 'quick';
+}
+
+function normalizePublicUrl(value: string | undefined): string {
+  const trimmed = (value ?? '').trim();
+  if (!trimmed) {
+    return '';
+  }
+  try {
+    const parsed = new URL(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
+    parsed.protocol = 'https:';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString().replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function remoteAccessPatch(
+  remoteAccess: RemoteAccessSettings,
+  input: {
+    mode?: RemoteAccessMode;
+    tunnelProtocol?: RemoteAccessProtocol;
+    hostname?: string;
+    publicUrl?: string;
+    tunnelName?: string;
+  }
+): RemoteAccessSettings {
+  const mode = input.mode !== undefined ? normalizeRemoteMode(input.mode) : remoteAccess.mode;
+  const nextPublicUrl =
+    mode === 'quick'
+      ? ''
+      : input.publicUrl !== undefined
+        ? normalizePublicUrl(input.publicUrl)
+        : input.hostname !== undefined
+          ? publicUrlForHostname(input.hostname)
+          : remoteAccess.publicUrl;
+  const nextHostname =
+    mode === 'quick'
+      ? ''
+      : input.hostname !== undefined
+        ? normalizeHostname(input.hostname)
+        : input.publicUrl !== undefined
+          ? hostnameFromPublicUrl(nextPublicUrl)
+        : publicHost({ ...remoteAccess, publicUrl: nextPublicUrl });
+
+  return {
+    ...remoteAccess,
+    mode,
+    ...(input.tunnelProtocol !== undefined ? { tunnelProtocol: input.tunnelProtocol } : {}),
+    hostname: nextHostname,
+    publicUrl: nextPublicUrl,
+    ...(input.tunnelName !== undefined ? { tunnelName: input.tunnelName.trim() || 'agent-pulse' } : {}),
+    ...(mode === 'edge'
+      ? {
+          tunnelId: '',
+          checklist: {
+            ...remoteAccess.checklist,
+            dependencyInstalled: true,
+            authenticated: true,
+            configured: Boolean(nextHostname && nextPublicUrl),
+            hostnameAssigned: Boolean(nextHostname && nextPublicUrl)
+          }
+        }
+      : {})
+  };
+}
+
+function hostnameFromPublicUrl(value: string): string {
+  try {
+    return new URL(value).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
 }
 
 function publicHost(remoteAccess: RemoteAccessSettings): string {

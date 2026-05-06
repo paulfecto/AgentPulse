@@ -206,7 +206,7 @@ final class AgentPulseStore: ObservableObject {
         guard
             let session,
             summary.remoteAccess.enabled,
-            summary.remoteAccess.mode == "named",
+            summary.remoteAccess.mode == "named" || summary.remoteAccess.mode == "edge",
             let remoteUrl = summary.server.remoteUrl?.trimmedNonEmpty,
             remoteUrl.hasPrefix("https://"),
             session.baseUrl.trimmedSlash() != remoteUrl.trimmedSlash()

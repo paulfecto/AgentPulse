@@ -3401,6 +3401,7 @@ function SettingsScreen({
     mode?: RemoteAccessSettings['mode'];
     tunnelProtocol?: RemoteAccessSettings['tunnelProtocol'];
     hostname?: string;
+    publicUrl?: string;
     tunnelName?: string;
   }) => {
     const next = await configureCloudflareRemoteAccess(adminToken, input);
@@ -3699,6 +3700,7 @@ function RemoteAccessPanel({
     mode?: RemoteAccessSettings['mode'];
     tunnelProtocol?: RemoteAccessSettings['tunnelProtocol'];
     hostname?: string;
+    publicUrl?: string;
     tunnelName?: string;
   }) => Promise<void>;
   onLogin: () => Promise<void>;
@@ -3706,6 +3708,7 @@ function RemoteAccessPanel({
   const [qrCode, setQrCode] = useState('');
   const [draftMode, setDraftMode] = useState<RemoteAccessSettings['mode']>(remoteAccess.mode);
   const [draftHostname, setDraftHostname] = useState(remoteAccess.hostname);
+  const [draftPublicUrl, setDraftPublicUrl] = useState(remoteAccess.publicUrl);
   const [draftTunnelName, setDraftTunnelName] = useState(remoteAccess.tunnelName);
   const [busy, setBusy] = useState<'configure' | 'login' | undefined>();
   const [error, setError] = useState('');
@@ -3713,8 +3716,9 @@ function RemoteAccessPanel({
   useEffect(() => {
     setDraftMode(remoteAccess.mode);
     setDraftHostname(remoteAccess.hostname);
+    setDraftPublicUrl(remoteAccess.publicUrl);
     setDraftTunnelName(remoteAccess.tunnelName);
-  }, [remoteAccess.hostname, remoteAccess.mode, remoteAccess.tunnelName]);
+  }, [remoteAccess.hostname, remoteAccess.mode, remoteAccess.publicUrl, remoteAccess.tunnelName]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3743,8 +3747,15 @@ function RemoteAccessPanel({
     };
   }, [remoteAccess.publicUrl]);
 
-  const stableMode = draftMode === 'named';
-  const publicUrlLabel = remoteAccess.mode === 'named' ? 'Stable Watch URL' : 'Temporary public URL';
+  const cloudflareNamedMode = draftMode === 'named';
+  const sharedEdgeMode = draftMode === 'edge';
+  const stableMode = cloudflareNamedMode || sharedEdgeMode;
+  const publicUrlLabel =
+    remoteAccess.mode === 'edge'
+      ? 'Shared beta Watch URL'
+      : remoteAccess.mode === 'named'
+        ? 'Stable Watch URL'
+        : 'Temporary public URL';
   const configureRemote = async () => {
     setBusy('configure');
     setError('');
@@ -3753,6 +3764,7 @@ function RemoteAccessPanel({
         mode: draftMode,
         tunnelProtocol: remoteAccess.tunnelProtocol,
         hostname: draftHostname,
+        ...(sharedEdgeMode ? { publicUrl: draftPublicUrl } : {}),
         tunnelName: draftTunnelName
       });
     } catch (configureError) {
@@ -3778,7 +3790,7 @@ function RemoteAccessPanel({
       <PanelHeading
         icon={<Cloud size={22} />}
         title="Remote access"
-        description="Use a Cloudflare Tunnel. Stable hostname mode is required for Apple Watch access away from this network."
+        description="Use Cloudflare Tunnel or the shared beta edge so Apple Watch can reach Agent Pulse away from this network."
       />
 
       <div className="remote-status-row">
@@ -3797,36 +3809,52 @@ function RemoteAccessPanel({
             onChange={(event) => setDraftMode(event.currentTarget.value as RemoteAccessSettings['mode'])}
           >
             <option value="named">Stable hostname</option>
+            <option value="edge">Shared beta edge</option>
             <option value="quick">Temporary URL</option>
           </select>
         </label>
-        <label>
-          Tunnel name
-          <input
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            value={draftTunnelName}
-            onChange={(event) => setDraftTunnelName(event.currentTarget.value)}
-          />
-        </label>
-        {stableMode ? (
-          <label className="remote-hostname-field">
-            Cloudflare hostname
+        {!sharedEdgeMode ? (
+          <label>
+            Tunnel name
             <input
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
-              placeholder="pulse.example.com"
+              value={draftTunnelName}
+              onChange={(event) => setDraftTunnelName(event.currentTarget.value)}
+            />
+          </label>
+        ) : null}
+        {stableMode ? (
+          <label className="remote-hostname-field">
+            {sharedEdgeMode ? 'Public hostname' : 'Cloudflare hostname'}
+            <input
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder={sharedEdgeMode ? 'beta.dope-ai.kr' : 'pulse.example.com'}
               value={draftHostname}
               onChange={(event) => setDraftHostname(event.currentTarget.value)}
+            />
+          </label>
+        ) : null}
+        {sharedEdgeMode ? (
+          <label className="remote-hostname-field">
+            Public Watch URL
+            <input
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="https://beta.dope-ai.kr/agent-pulse"
+              value={draftPublicUrl}
+              onChange={(event) => setDraftPublicUrl(event.currentTarget.value)}
             />
           </label>
         ) : null}
       </div>
 
       <div className="remote-actions">
-        {stableMode ? (
+        {cloudflareNamedMode ? (
           <button className="secondary-action" type="button" onClick={() => void loginRemote()} disabled={Boolean(busy)}>
             <LogIn size={16} />
             {busy === 'login' ? 'Opening login' : 'Cloudflare login'}
@@ -3834,7 +3862,7 @@ function RemoteAccessPanel({
         ) : null}
         <button className="secondary-action" type="button" onClick={() => void configureRemote()} disabled={Boolean(busy)}>
           <Cloud size={16} />
-          {busy === 'configure' ? 'Configuring' : 'Configure tunnel'}
+          {busy === 'configure' ? 'Configuring' : sharedEdgeMode ? 'Configure edge' : 'Configure tunnel'}
         </button>
         <button className="secondary-action" type="button" onClick={onCheck}>
           <RefreshCw size={16} />
@@ -3842,34 +3870,36 @@ function RemoteAccessPanel({
         </button>
       </div>
 
-      <label className="remote-protocol-control">
-        <span>
-          Tunnel protocol
-          <span
-            className="inline-help"
-            title="Auto lets Cloudflare choose. Try HTTP/2 if the tunnel feels slow or unstable. Try QUIC when UDP works well on your network."
-          >
-            <HelpCircle size={14} />
+      {!sharedEdgeMode ? (
+        <label className="remote-protocol-control">
+          <span>
+            Tunnel protocol
+            <span
+              className="inline-help"
+              title="Auto lets Cloudflare choose. Try HTTP/2 if the tunnel feels slow or unstable. Try QUIC when UDP works well on your network."
+            >
+              <HelpCircle size={14} />
+            </span>
           </span>
-        </span>
-        <select
-          value={remoteAccess.tunnelProtocol}
-          onChange={(event) =>
-            onProtocolChange(event.currentTarget.value as RemoteAccessSettings['tunnelProtocol'])
-          }
-        >
-          <option value="auto">Auto</option>
-          <option value="http2">HTTP/2</option>
-          <option value="quic">QUIC</option>
-        </select>
-      </label>
+          <select
+            value={remoteAccess.tunnelProtocol}
+            onChange={(event) =>
+              onProtocolChange(event.currentTarget.value as RemoteAccessSettings['tunnelProtocol'])
+            }
+          >
+            <option value="auto">Auto</option>
+            <option value="http2">HTTP/2</option>
+            <option value="quic">QUIC</option>
+          </select>
+        </label>
+      ) : null}
 
       <div className="remote-checklist" aria-label="Remote access checklist">
-        <ChecklistItem label="cloudflared installed" done={remoteAccess.checklist.dependencyInstalled} />
-        <ChecklistItem label={stableMode ? 'Cloudflare login' : 'No login needed'} done={remoteAccess.checklist.authenticated} />
-        <ChecklistItem label={stableMode ? 'Named tunnel ready' : 'Quick tunnel ready'} done={remoteAccess.checklist.configured} />
-        <ChecklistItem label={stableMode ? 'Hostname routed' : 'Random URL ready'} done={remoteAccess.checklist.hostnameAssigned} />
-        <ChecklistItem label="Tunnel running" done={remoteAccess.checklist.tunnelRunning} />
+        <ChecklistItem label={sharedEdgeMode ? 'Shared edge configured' : 'cloudflared installed'} done={remoteAccess.checklist.dependencyInstalled} />
+        <ChecklistItem label={sharedEdgeMode ? 'No tunnel login needed' : cloudflareNamedMode ? 'Cloudflare login' : 'No login needed'} done={remoteAccess.checklist.authenticated} />
+        <ChecklistItem label={sharedEdgeMode ? 'Public URL configured' : cloudflareNamedMode ? 'Named tunnel ready' : 'Quick tunnel ready'} done={remoteAccess.checklist.configured} />
+        <ChecklistItem label={sharedEdgeMode ? 'Hostname assigned' : cloudflareNamedMode ? 'Hostname routed' : 'Random URL ready'} done={remoteAccess.checklist.hostnameAssigned} />
+        <ChecklistItem label={sharedEdgeMode ? 'Edge enabled' : 'Tunnel running'} done={remoteAccess.checklist.tunnelRunning} />
       </div>
 
       {remoteAccess.publicUrl ? (
@@ -3892,8 +3922,10 @@ function RemoteAccessPanel({
         </div>
       ) : (
         <div className="remote-empty">
-          {stableMode
-            ? 'Enter a Cloudflare hostname, configure the tunnel, then turn on remote access.'
+          {sharedEdgeMode
+            ? 'Enter the shared beta hostname and public URL, configure the edge, then turn on remote access.'
+            : stableMode
+              ? 'Enter a Cloudflare hostname, configure the tunnel, then turn on remote access.'
             : 'Configure temporary URL mode, then turn on remote access to create a Cloudflare URL.'}
         </div>
       )}

@@ -31,6 +31,10 @@ Codex-safe remote runtime.
 - Do not delete broad paths; avoid cleanup commands unless they target narrow,
   known disposable files.
 - Stable Cloudflare hostname and APNs `.p8` key material are external inputs.
+- Current macmini3 target: `https://beta.dope-ai.kr/agent-pulse`, with shared
+  beta edge routing matching the `management-tool` path-prefix pattern.
+- Agent Pulse uses a Docker nginx edge container on macmini3, but the real
+  helper stays a macOS host process so it can spawn the real Codex app-server.
 
 ## Owning layer
 
@@ -54,6 +58,14 @@ Codex-safe remote runtime.
 - `apps/watchos/AgentPulseWatch/AgentPulseWatch.xcodeproj/project.pbxproj`
 - `apps/watchos/AgentPulseWatch/AgentPulseWatch/**`
 - `apps/watchos/AgentPulseWatch/README.md`
+- `apps/tablet/vite.config.ts`
+- `apps/tablet/index.html`
+- `docker-compose.macmini3.yml`
+- `deploy/macmini3/agentpulse-nginx.conf`
+- `deploy/macmini3/beta-shared-edge-agentpulse.conf`
+- `docs/deploy/macmini3-agent-pulse-beta.md`
+- `scripts/macmini3/run-agentpulse-beta-helper.sh`
+- `scripts/macmini3/check-agentpulse-beta.sh`
 - `scripts/generate-watch-icons.sh`
 - `scripts/watch-remote-helper.sh`
 
@@ -88,8 +100,13 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
 
 - `WatchSummaryResponse.remoteAccess` now includes `mode` so the Watch can
   distinguish stable named tunnels from temporary quick tunnels.
+- `RemoteAccessMode` now includes `edge` for externally managed HTTPS reverse
+  proxy deployments such as `beta.dope-ai.kr/agent-pulse`.
 - The Watch store may persist an HTTPS named remote URL returned by
-  `/watch/summary` after a local/LAN pairing succeeds.
+  `/watch/summary` after a local/LAN pairing succeeds; this also applies to
+  shared-edge mode.
+- The tablet build accepts `AGENT_PULSE_PUBLIC_BASE_PATH=/agent-pulse/` so
+  generated assets and app shell links work under a path prefix.
 - The tablet settings admin surface can configure stable Cloudflare hostname,
   tunnel name, login, and temporary tunnel mode through existing helper
   settings routes.
@@ -108,6 +125,8 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
   named mode before Cloudflare login.
 - The dedicated Watch remote launcher keeps Codex Desktop control disabled and
   does not kill existing Codex Desktop processes.
+- The macmini3 Docker edge proxies `https://beta.dope-ai.kr/agent-pulse/`
+  traffic to the host helper without starting a managed Cloudflare tunnel.
 - Docker `pnpm test`, `pnpm typecheck`, and `pnpm build` pass or record a real
   environment blocker.
 - Xcode simulator build is attempted with signing disabled.
@@ -135,18 +154,20 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
 | Helper Cloudflare guard | Docker targeted Vitest | named tunnel refuses missing login/hostname |
 | Tablet settings | Docker targeted Vitest | stable hostname mode can be configured |
 | Shared/watch contract | Docker targeted Vitest and typecheck | `/watch/summary` exposes remote mode |
+| macmini3 edge | Docker compose config check plus route curl smoke | `/agent-pulse/` strips to the host helper |
 | Repo gates | Docker `pnpm test`, `pnpm typecheck`, `pnpm build` | product checks pass in disposable container |
-| Runtime launcher | static review and fail-fast checks | launcher requires hostname/cloudflared login and disables Codex Desktop control |
+| Runtime launcher | static review and fail-fast checks | macmini3 launcher seeds shared-edge settings and disables Codex Desktop control |
 
 ## Deploy/runtime impact
 
 - Real helper runtime remains a macOS host process because the Codex app-server
   binary is macOS-only.
-- Docker is used only for validation and leaves no long-running container.
+- Docker is used for validation and for the macmini3 nginx edge container; the
+  helper itself remains a host process.
 - The new Watch remote launcher refuses to start when port `55110` is already in
   use; it does not kill existing helper or Codex Desktop processes.
-- Stable world access still requires an external Cloudflare hostname and local
-  `cloudflared` login before launch.
+- Stable world access on macmini3 uses the existing `beta.dope-ai.kr` shared
+  edge and does not require an Agent Pulse-managed Cloudflare tunnel.
 - APNs delivery still requires external Apple APNs Key ID and `.p8` key path.
 
 ## Review risks and open questions
@@ -160,6 +181,21 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
   authentication state.
 
 ## Validation evidence
+
+- macmini3 shared beta repo update, 2026-05-06:
+  - `git diff --check` passed.
+  - `bash -n scripts/dev-run-all.sh scripts/macmini3/run-agentpulse-beta-helper.sh scripts/macmini3/check-agentpulse-beta.sh` passed.
+  - `docker compose -f docker-compose.macmini3.yml config` passed.
+  - `docker run --rm --add-host=host.docker.internal:host-gateway -v "$PWD/deploy/macmini3/agentpulse-nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:1.27-alpine nginx -t` passed.
+  - Disposable Docker gate passed:
+    `pnpm test` (34 files, 461 tests), `pnpm typecheck`, and
+    `AGENT_PULSE_PUBLIC_BASE_PATH=/agent-pulse/ pnpm build`.
+  - The build was run in a disposable container copy of the repo with
+    `node_modules`, `dist`, coverage, and transient automation directories
+    excluded from the tar stream.
+  - Runtime deployment on macmini3 was not performed from this repo turn because
+    repo-local capability policy denies deploy mutation; the committed Docker
+    edge and route scripts are ready for the macmini3 deployment step.
 
 - commands run: `git -C ../agentOS fetch origin main --prune`; `git -C
   ../agentOS pull --ff-only origin main`; `bash
@@ -217,16 +253,19 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
   catalog, and launcher changes.
 - review artifact:
   `docs/exec-plans/active/review-cycles/watch-global-runtime/cycle-001/review-verdict.md`
+- reviewer: `codex` using `harness-reviewer` for the macmini3 shared beta edge
+  update.
+- review artifact:
+  `docs/exec-plans/active/review-cycles/watch-global-runtime/cycle-002/review-verdict.md`
 - unresolved findings: no blocking code findings from local review. External
-  blockers remain stable Cloudflare hostname/authentication and APNs key
-  material.
+  blockers remain macmini3 shared-edge mutation authority and APNs key material.
 
 ## Completion status
 
-- state: complete-with-external-blockers.
-- ready for merge or deploy: code and validation are ready for review; global
-  runtime launch and APNs proof require the external hostname and Apple APNs
-  secrets.
+- state: repo-complete-with-external-deploy-blocker.
+- ready for merge or deploy: code and validation are ready for review; macmini3
+  launch requires applying the shared edge route and starting the Docker edge on
+  macmini3. APNs proof still requires Apple APNs secrets.
 
 ## Frontier routing
 

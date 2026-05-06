@@ -71,6 +71,8 @@ harness root and confirm the repo has the current shared skill surface enabled.
 - `apps/tablet/src/App.test.tsx` as pre-existing active Watch remote/settings
   product work observed in the dirty worktree, not modified by this convergence
   pass
+- `apps/tablet/src/api.ts` as active Watch remote/path-prefix product work
+  observed in the dirty worktree, not modified by this convergence pass
 
 ## File cohesion plan
 
@@ -95,6 +97,10 @@ or refactor them.
   disposition: `preserve-only`
   reason-code: `deferred-decomposition`
 - file: `apps/tablet/src/App.test.tsx`
+  classification: `handwritten-source`
+  disposition: `preserve-only`
+  reason-code: `deferred-decomposition`
+- file: `apps/tablet/src/api.ts`
   classification: `handwritten-source`
   disposition: `preserve-only`
   reason-code: `deferred-decomposition`

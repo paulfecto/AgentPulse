@@ -1,0 +1,16 @@
+services:
+  agentpulse-edge:
+    image: nginx:1.27-alpine
+    container_name: agentpulse-beta-edge
+    restart: unless-stopped
+    ports:
+      - "${AGENT_PULSE_EDGE_BIND:-127.0.0.1}:${AGENT_PULSE_EDGE_PORT:-4355}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./deploy/macmini3/agentpulse-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health/get >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8

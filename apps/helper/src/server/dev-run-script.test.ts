@@ -20,6 +20,8 @@ describe('dev-run Cloudflare wiring', () => {
     expect(script).toContain('if [[ "$tunnel_target" == "vite" ]]');
     expect(script).toContain('service: $tunnel_origin');
     expect(script).toContain('origin_url="$tunnel_origin"');
+    expect(script).toContain("remote.mode === 'edge'");
+    expect(script).toContain('Shared edge remote access is externally managed');
   });
 
   it('stops any existing listener on the configured helper port before starting dev mode', async () => {
@@ -46,5 +48,25 @@ describe('dev-run Cloudflare wiring', () => {
     expect(viteConfig).toContain('AGENT_PULSE_HMR_CLIENT_PORT');
     expect(viteConfig).toContain('settings.remoteAccess?.hostname');
     expect(viteConfig).toContain('new URL(publicUrl).hostname');
+  });
+
+  it('supports path-prefixed tablet builds for the macmini3 shared beta edge', async () => {
+    const viteConfig = await readFile(path.join(repoRoot, 'apps/tablet/vite.config.ts'), 'utf8');
+    const tabletApi = await readFile(path.join(repoRoot, 'apps/tablet/src/api.ts'), 'utf8');
+    const helperScript = await readFile(path.join(repoRoot, 'scripts/macmini3/run-agentpulse-beta-helper.sh'), 'utf8');
+    const compose = await readFile(path.join(repoRoot, 'docker-compose.macmini3.yml'), 'utf8');
+    const nginx = await readFile(path.join(repoRoot, 'deploy/macmini3/beta-shared-edge-agentpulse.conf'), 'utf8');
+
+    expect(viteConfig).toContain('AGENT_PULSE_PUBLIC_BASE_PATH');
+    expect(viteConfig).toContain('base,');
+    expect(tabletApi).toContain('BASE_URL');
+    expect(tabletApi).toContain("apiPath('/events')");
+    expect(helperScript).toContain('AGENT_PULSE_PUBLIC_BASE_PATH="$public_base_path"');
+    expect(helperScript).toContain('AGENT_PULSE_SKIP_MANAGED_TUNNEL=1');
+    expect(helperScript).toContain('AGENT_PULSE_DISABLE_CODEX_DESKTOP=1');
+    expect(compose).toContain('agentpulse-beta-edge');
+    expect(compose).toContain('4355');
+    expect(nginx).toContain('location ^~ /agent-pulse/');
+    expect(nginx).toContain('proxy_pass http://127.0.0.1:4355/');
   });
 });

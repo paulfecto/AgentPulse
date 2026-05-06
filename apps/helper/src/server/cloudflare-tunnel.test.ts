@@ -150,6 +150,41 @@ describe('CloudflareTunnelSupervisor', () => {
     );
   });
 
+  it('treats shared beta edge mode as externally managed without cloudflared', async () => {
+    const settings = await createSettings({
+      enabled: true,
+      mode: 'edge',
+      hostname: 'beta.dope-ai.kr',
+      publicUrl: 'https://beta.dope-ai.kr/agent-pulse'
+    });
+    const spawn = vi.fn();
+    const supervisor = new CloudflareTunnelSupervisor({
+      settings,
+      settingsStore: createSettingsStore(),
+      helperPort: settings.port,
+      execFile: vi.fn((_file, _args, callback) => {
+        callback(new Error('cloudflared missing'), '', '');
+      }),
+      spawn
+    });
+
+    const checked = await supervisor.check();
+    const enabled = await supervisor.setEnabled(true);
+
+    expect(checked).toMatchObject({
+      status: 'healthy',
+      checklist: {
+        dependencyInstalled: true,
+        authenticated: true,
+        configured: true,
+        tunnelRunning: true,
+        hostnameAssigned: true
+      }
+    });
+    expect(enabled.status).toBe('healthy');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it('starts cloudflared with config and metrics arguments', async () => {
     const settings = await createSettings({
       enabled: true,

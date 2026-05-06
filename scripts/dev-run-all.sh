@@ -52,7 +52,7 @@ const values = {
   helper_port: Number.isFinite(rawPort) && rawPort > 0 ? rawPort : fallback.helperPort,
   remote_enabled: remote.enabled === true,
   remote_provider: typeof remote.provider === 'string' && remote.provider ? remote.provider : fallback.remoteProvider,
-  remote_mode: remote.mode === 'named' ? 'named' : 'quick',
+  remote_mode: remote.mode === 'edge' ? 'edge' : remote.mode === 'named' ? 'named' : 'quick',
   tunnel_protocol:
     remote.tunnelProtocol === 'http2' || remote.tunnelProtocol === 'quic' ? remote.tunnelProtocol : fallback.tunnelProtocol,
   config_path: typeof remote.configPath === 'string' && remote.configPath ? remote.configPath : fallback.configPath,
@@ -92,7 +92,7 @@ const checklist = remote && typeof remote === 'object' && remote.checklist && ty
 const values = {
   health_remote_enabled: remote.enabled === true,
   health_remote_provider: typeof remote.provider === 'string' ? remote.provider : '',
-  health_remote_mode: remote.mode === 'named' ? 'named' : 'quick',
+  health_remote_mode: remote.mode === 'edge' ? 'edge' : remote.mode === 'named' ? 'named' : 'quick',
   health_remote_status: typeof remote.status === 'string' ? remote.status : '',
   health_tunnel_running: checklist.tunnelRunning === true
 };
@@ -262,6 +262,12 @@ fi
 
 if [[ "$remote_enabled" != "true" || "$remote_provider" != "cloudflare" ]]; then
   log "Remote Cloudflare access is disabled in settings; keeping helper and Vite running."
+  wait "$helper_pid"
+  exit $?
+fi
+
+if [[ "$remote_mode" == "edge" ]]; then
+  log "Shared edge remote access is externally managed; keeping helper and Vite running."
   wait "$helper_pid"
   exit $?
 fi
