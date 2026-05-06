@@ -445,6 +445,36 @@ unrelated source as part of the Watch E2E runtime setup.
     off-LAN Watch access through `https://beta.dope-ai.kr/agent-pulse` remains
     blocked until the macmini3 shared edge route is applied and reloaded.
 
+## Watch shared-edge timeout guard, 2026-05-06
+
+- failing signal: local helper `/health/get` reports
+  `remoteAccess.mode: "edge"` and
+  `publicUrl: "https://beta.dope-ai.kr/agent-pulse"`, but the public
+  `/agent-pulse/health/get` route returns the Project Manager HTML shell. The
+  Watch could therefore persist a broken public base URL after a successful
+  local/LAN refresh.
+- fix: `AgentPulseStore.persistStableRemoteSession` now auto-migrates only for
+  helper-managed named tunnels with `remoteAccess.status == "connected"`. Edge
+  mode is an externally managed reverse proxy, so the Watch keeps its existing
+  paired base URL until the user explicitly pairs to the public URL after the
+  edge route is live.
+- safety proof:
+  - Project Manager health stayed healthy at
+    `https://beta.dope-ai.kr/project-manager/health` before this change.
+  - no `management-tool` files, Project Manager containers, or shared-edge
+    services were changed or restarted.
+  - Agent Pulse local helper stayed healthy at
+    `http://127.0.0.1:55110/health/get` with real Codex app-server connected.
+- Watch validation:
+  - watchOS simulator build passed with signing disabled.
+  - physical Watch build passed for device `00008301-2084A531140BC02E` with
+    `DEVELOPMENT_TEAM=H86Z687FT6`.
+  - physical install and launch retry are currently blocked by Apple
+    CoreDevice tunnel/DDI timeouts: `Network.NWError error 60`. `devicectl
+    list devices` still reports `Paul’s Apple Watch` as `available (paired)`,
+    and the installed app remains present, but CoreDevice cannot establish the
+    install/launch tunnel in this moment.
+
 ## Frontier routing
 
 - status: single-lane-not-escalated.
