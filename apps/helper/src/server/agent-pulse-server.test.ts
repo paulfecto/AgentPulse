@@ -905,6 +905,94 @@ describe('Agent Pulse helper API', () => {
     }
   });
 
+  it('returns only Codex app-visible threads in the watch summary', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const codexThread: Thread = {
+      threadId: 'codex-visible',
+      provider: 'codex',
+      title: 'Visible Codex thread',
+      workspace: 'AgentPulse',
+      workspacePath: '/private/provider/path',
+      status: 'idle',
+      lastActivityAt: '2026-05-05T02:00:00Z',
+      lastTurnSummary: 'Real Codex thread.'
+    };
+    const claudeThread: Thread = {
+      threadId: 'claude-thread',
+      provider: 'claude-code',
+      title: 'Claude side lane',
+      workspace: 'AgentPulse',
+      workspacePath: '/private/provider/path',
+      status: 'running',
+      lastActivityAt: '2026-05-05T02:05:00Z',
+      lastTurnSummary: 'Not shown in Codex Desktop.'
+    };
+    const copilotThread: Thread = {
+      threadId: 'copilot-thread',
+      provider: 'copilot',
+      title: 'Copilot side lane',
+      workspace: 'AgentPulse',
+      workspacePath: '/private/provider/path',
+      status: 'waiting_approval',
+      lastActivityAt: '2026-05-05T02:10:00Z',
+      lastTurnSummary: 'Not shown in Codex Desktop.'
+    };
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: false,
+      remoteAccess: remoteAccessSettings()
+    };
+    const emptySideLaneTranscript = (threadId: string): ThreadTranscript => ({
+      threadId,
+      activeTurnId: null,
+      sendState: {
+        canSend: true,
+        reason: 'ready',
+        label: 'Ready'
+      },
+      messages: []
+    });
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore: { save: vi.fn(), load: vi.fn() } as unknown as HelperSettingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: { listThreads: async () => [codexThread] },
+      claudeCode: {
+        listThreads: async () => [claudeThread],
+        listProjects: async () => [],
+        readTranscript: vi.fn(async () => emptySideLaneTranscript('claude-thread')),
+        sendMessage: vi.fn()
+      },
+      copilot: {
+        listThreads: async () => [copilotThread],
+        listProjects: async () => [],
+        readTranscript: vi.fn(async () => emptySideLaneTranscript('copilot-thread')),
+        sendMessage: vi.fn()
+      },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      const response = await fetch(`${server.url}/watch/summary`, {
+        headers: authHeaders(token, deviceId)
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.threads.map((thread: { threadId: string }) => thread.threadId)).toEqual([
+        'codex-visible'
+      ]);
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('returns path-prefixed shared edge URL in watch summary and pairing lookup', async () => {
     const registry = new DeviceRegistry(new MemoryDeviceStore());
     const pairing = new PairingManager(registry);

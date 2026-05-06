@@ -23,13 +23,37 @@ struct ThreadDetailView: View {
             }
             Section("Messages") {
                 if let transcript = store.transcript {
-                    ForEach(transcript.messages.suffix(8)) { message in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(message.role.capitalized)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                            Text(message.text ?? "")
-                                .lineLimit(5)
+                    if store.hasOlderMessages {
+                        HStack {
+                            Spacer()
+                            if store.isLoadingOlderMessages {
+                                ProgressView()
+                            } else {
+                                Text("Load earlier messages")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .onAppear {
+                            Task { await store.loadOlderMessagesIfNeeded() }
+                        }
+                    }
+                    ForEach(transcript.messages) { message in
+                        MessageRow(message: message)
+                            .onAppear {
+                                if message.id == transcript.messages.first?.id {
+                                    Task {
+                                        await store.loadOlderMessagesIfNeeded(currentMessageId: message.id)
+                                    }
+                                }
+                            }
+                    }
+                    if transcript.messages.isEmpty {
+                        HStack {
+                            Spacer()
+                            WatchLogoMark(size: 34)
+                            Spacer()
                         }
                     }
                 } else {
@@ -80,6 +104,29 @@ struct ThreadDetailView: View {
         }
         .refreshable {
             await store.loadThread(thread.threadId)
+        }
+    }
+}
+
+private struct MessageRow: View {
+    let message: ChatMessage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            Text(message.text ?? "")
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var label: String {
+        switch message.role {
+        case "activity":
+            return message.kind.capitalized
+        default:
+            return message.role.capitalized
         }
     }
 }

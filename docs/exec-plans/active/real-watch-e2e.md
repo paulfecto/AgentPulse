@@ -258,6 +258,18 @@ unrelated source as part of the Watch E2E runtime setup.
 
 ## TDD evidence
 
+### Watch Codex conversation parity fix, 2026-05-06
+
+- failing signal to prove: Watch detail fetches `view=watch`, renders only
+  `suffix(8)`, clamps messages to 5 lines, and the Codex thread reader lets
+  generated project-anchor rows through as normal sidebar threads.
+- intended fix: Watch detail uses the default Codex-visible transcript window,
+  lazy-loads older history, and the helper filters Codex thread rows to hide
+  subagent/internal/project-anchor rows from user-facing lists.
+- validation to record: targeted Vitest red/green, Docker `pnpm test`,
+  Docker `pnpm typecheck`, Docker `pnpm build`, Watch simulator build, and
+  physical Watch install if Xcode/device connectivity permits.
+
 - red signal: targeted tests and runtime probes initially exposed missing
   desktop-disabled guardrails and Watch build/toolchain compatibility issues.
 - red artifact: failing Docker targeted tests and failing Xcode simulator build
@@ -368,6 +380,70 @@ unrelated source as part of the Watch E2E runtime setup.
   APNs auth key `.p8` path and Key ID have been provided. Current isolated
   helper settings show `watchNotifications.enabled: false`, `bundleId:
   com.paulfecto.AgentPulse.watchkitapp`, and `environment: sandbox`.
+
+## Watch Codex conversation parity proof, 2026-05-06
+
+- targeted red signal: before the fix, `view=watch` remained the Watch detail
+  fetch path, Watch detail rendered only `suffix(8)`, messages were line
+  clamped, and targeted helper tests proved subagent/internal/project-anchor
+  rows could reach Watch-facing thread lists.
+- implementation result: Watch detail now requests the default
+  Codex-visible transcript window, renders all loaded messages without a line
+  clamp, lazy-loads older pages through
+  `/threads/:threadId/transcript/older`, and notification navigation refreshes
+  the selected thread detail.
+- helper result: the Codex thread reader applies one Codex-visible row
+  predicate before workspace limiting, `/watch/summary` only exposes Codex
+  provider rows, and generated project anchors, subagent sources, internal
+  rows, Claude, and Copilot side-lane rows are excluded from the Watch summary.
+- deployment config fix: `deploy/macmini3/agentpulse-nginx.conf` and
+  `scripts/macmini3/check-agentpulse-beta.sh` now point at helper port `55110`,
+  matching `scripts/macmini3/run-agentpulse-beta-helper.sh` and the documented
+  macmini3 runtime.
+- Docker validation passed:
+  - targeted `vitest run apps/helper/src/server/dev-run-script.test.ts`: 5
+    tests passed.
+  - full `pnpm test`: 34 files and 463 tests passed.
+  - `pnpm typecheck`: passed.
+  - `pnpm build`: passed.
+- deployment config validation passed:
+  - `docker compose -f docker-compose.macmini3.yml config` passed.
+  - `docker run --rm --add-host=host.docker.internal:host-gateway -v
+    "$PWD/deploy/macmini3/agentpulse-nginx.conf:/etc/nginx/conf.d/default.conf:ro"
+    nginx:1.27-alpine nginx -t` passed.
+  - `bash -n scripts/macmini3/run-agentpulse-beta-helper.sh
+    scripts/macmini3/check-agentpulse-beta.sh` passed.
+- Watch build/install proof from this fix cycle:
+  - watchOS simulator build passed with signing disabled.
+  - physical build passed for device `00008301-2084A531140BC02E` with
+    `DEVELOPMENT_TEAM=H86Z687FT6`.
+  - `devicectl device install app` installed
+    `com.paulfecto.AgentPulse.watchkitapp`, and `devicectl device process
+    launch` launched the Watch app.
+- runtime proof:
+  - local `http://127.0.0.1:55110/health/get` returned
+    `codexAppServer: "connected"` with `remoteAccess.mode: "edge"` and
+    `publicUrl: "https://beta.dope-ai.kr/agent-pulse"`.
+  - process proof showed helper process
+    `/opt/homebrew/bin/node apps/helper/dist/dev-server.js` with child
+    `/Applications/Codex.app/Contents/Resources/codex app-server`; no
+    `/tmp/fake-bin/codex` process was present.
+  - authenticated `/watch/summary` returned 12 threads, all provider `codex`,
+    with `canOpenOnMac: false`.
+  - authenticated transcript checks returned full default transcripts for
+    Codex-visible rows; examples included `ChemToS` with 52 loaded messages and
+    an older page of 10 messages, and `agent pulse` with 180 loaded messages
+    and an older page of 10 messages.
+- current live-route blocker:
+  - `https://beta.dope-ai.kr/agent-pulse/health/get` returns HTTP 200 with the
+    `project-manager` HTML shell instead of Agent Pulse JSON, so the shared
+    beta edge has not applied the `/agent-pulse` route yet.
+  - configured SSH host `macmini-3.local` does not resolve from this machine;
+    visible LAN SSH hosts rejected available noninteractive credentials, so
+    the live macmini3 shared edge could not be reloaded from this run.
+  - result: local Watch/helper parity is fixed and installed, but cellular or
+    off-LAN Watch access through `https://beta.dope-ai.kr/agent-pulse` remains
+    blocked until the macmini3 shared edge route is applied and reloaded.
 
 ## Frontier routing
 

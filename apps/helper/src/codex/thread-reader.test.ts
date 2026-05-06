@@ -4,6 +4,7 @@ import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   CodexThreadReader,
+  isCodexUserFacingThreadRow,
   isUserFacingThreadSource,
   isLiveStatusFresh,
   limitCodexSidebarHistory,
@@ -606,6 +607,60 @@ describe('Codex thread reader', () => {
         '{"subagent":{"thread_spawn":{"parent_thread_id":"parent","depth":1,"agent_role":"worker"}}}'
       )
     ).toBe(false);
+  });
+
+  it('does not treat internal, subagent, or generated project-anchor rows as Codex-visible chats', () => {
+    const sidebar = parseCodexSidebarState(
+      JSON.stringify({
+        'electron-saved-workspace-roots': ['/Users/me/projects/AgentPulse']
+      })
+    );
+
+    expect(
+      isCodexUserFacingThreadRow(
+        {
+          id: 'internal-thread',
+          title: 'Internal sidebar row',
+          cwd: '/Users/me/projects/AgentPulse',
+          source: 'codex-sidebar-internal'
+        },
+        sidebar
+      )
+    ).toBe(false);
+    expect(
+      isCodexUserFacingThreadRow(
+        {
+          id: 'subagent-thread',
+          title: 'Socrates',
+          cwd: '/Users/me/projects/AgentPulse',
+          source:
+            '{"subagent":{"thread_spawn":{"parent_thread_id":"parent","depth":1,"agent_role":"worker"}}}'
+        },
+        sidebar
+      )
+    ).toBe(false);
+    expect(
+      isCodexUserFacingThreadRow(
+        {
+          id: 'anchor-thread',
+          title: 'AgentPulse project anchor',
+          cwd: '/Users/me/projects/AgentPulse',
+          source: 'vscode'
+        },
+        sidebar
+      )
+    ).toBe(false);
+    expect(
+      isCodexUserFacingThreadRow(
+        {
+          id: 'real-thread',
+          title: 'Fix Watch transcript',
+          cwd: '/Users/me/projects/AgentPulse',
+          source: 'vscode'
+        },
+        sidebar
+      )
+    ).toBe(true);
   });
 
   it('uses the folder name as the workspace label', () => {

@@ -73,6 +73,12 @@ struct ThreadTranscript: Decodable {
     let messages: [ChatMessage]
 }
 
+struct OlderThreadMessagesResponse: Decodable {
+    let threadId: String
+    let messages: [ChatMessage]
+    let hasMore: Bool
+}
+
 struct ChatMessage: Identifiable, Decodable {
     let id: String
     let role: String

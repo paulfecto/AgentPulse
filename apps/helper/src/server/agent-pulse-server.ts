@@ -1609,11 +1609,12 @@ function createApp(
     }
 
     const { threads } = await listAllThreads();
+    const watchThreads = threads.filter(isCodexAppVisibleThread);
     const remoteAccess = options.remoteAccess?.getStatus() ?? currentSettings.remoteAccess;
     const requestUrl = new URL(context.req.url);
     const baseUrl = `${requestUrl.protocol}//${requestUrl.host}`;
     const statusRank = new Map(THREAD_STATUS_PRIORITY.map((status, index) => [status, index]));
-    const compactThreads = [...threads]
+    const compactThreads = [...watchThreads]
       .sort((left, right) => {
         const statusDelta =
           (statusRank.get(left.status) ?? THREAD_STATUS_PRIORITY.length) -
@@ -4094,6 +4095,10 @@ function transcriptIsLiveForWatch(transcript: ThreadTranscript): boolean {
     transcript.sendState.reason === 'thread_changed' &&
     transcript.sendState.label.endsWith(' is working')
   );
+}
+
+function isCodexAppVisibleThread(thread: Thread): boolean {
+  return (thread.provider ?? 'codex') === 'codex';
 }
 
 function exposeLocalAttachments(

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="agentos-ledger-template-version" content="3">
-  <meta name="agentos-ledger-fingerprint" content="773c20fc6529c341b0b9d78f3bfece2a2171000ca88f27325c393c81585ce89d">
+  <meta name="agentos-ledger-fingerprint" content="5af5d15201fc368e1f567d9a3c30a9da97e6fb917d20b49e7b0bd5ddd211a59b">
   <title>AgentOS Progress Ledger</title>
   <style>
     :root {
@@ -48,7 +48,7 @@
 <body>
   <main>
     <h1>AgentOS Progress Ledger</h1>
-    <p class="meta">Generated at 2026-05-06T02:39:41Z from the active execution plans. This ledger is an operator-visible projection of current plan state, validation evidence, TDD evidence, and review evidence. It is not a cryptographically signed audit record and does not replace the underlying execution plans.</p>
+    <p class="meta">Generated at 2026-05-06T05:47:11Z from the active execution plans. This ledger is an operator-visible projection of current plan state, validation evidence, TDD evidence, and review evidence. It is not a cryptographically signed audit record and does not replace the underlying execution plans.</p>
     <section class="summary">
       <div class="summary-card"><span>Active plans</span><strong>4</strong></div>
       <div class="summary-card"><span>Completed plans</span><strong>0</strong></div>
@@ -95,17 +95,17 @@
       <article class="card">
         <header>
           <h2>real-watch-e2e.md</h2>
-          <span class="badge stage-validating">validating</span>
+          <span class="badge stage-executing">executing</span>
         </header>
         <p class="target">`AGENT_PULSE_DISABLE_CODEX_DESKTOP=1` prevents Codex Desktop IPC connection and blocks `/thread/open`. The helper runs on `55110` with the real bundled Codex app-server binary,...</p>
-        <div class="meter"><span style="width:85%"></span></div>
+        <div class="meter"><span style="width:55%"></span></div>
         <dl>
           <div><dt>Layer</dt><dd>Owner: `codex` Product layers: helper runtime guardrails, shared watch capability contract, watchOS project/scaffold, and runtime validation evidence. Runtime boundary: helper c...</dd></div>
           <div><dt>State</dt><dd>complete-with-apple-membership-blocker.</dd></div>
           <div><dt>Ready</dt><dd>yes for checked-in helper/watch runtime changes;</dd></div>
           <div><dt>Write set</dt><dd>`docs/exec-plans/active/real-watch-e2e.md` `docs/exec-plans/active/HARNESS_PROGRESS_LEDGER.html` `docs/exec-plans/active/TEAM_PROGRESS_LEDGER.html` `docs/exec-plans/active/WORKI...</dd></div>
           <div><dt>Validation</dt><dd>commands run: Docker targeted helper/shared/settings/auth tests; Docker `pnpm test`; Docker `pnpm typecheck`; Docker `pnpm build`; helper runtime health/process/API probes; Xcod...</dd></div>
-          <div><dt>TDD</dt><dd>red signal: targeted tests and runtime probes initially exposed missing desktop-disabled guardrails and Watch build/toolchain compatibility issues. red artifact: failing Docker...</dd></div>
+          <div><dt>TDD</dt><dd>—</dd></div>
           <div><dt>Review</dt><dd>reviewer: `codex` using AgentOS execution-plan validation and targeted diff inspection. one source of truth: helper owns runtime state and Codex transport; shared schemas own wa...</dd></div>
         </dl>
       </article>

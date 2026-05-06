@@ -66,10 +66,10 @@ struct SummaryView: View {
 
     var body: some View {
         List {
-            if let selectedThread = store.selectedThread {
+            if let navigationThread = store.navigationThread {
                 NavigationLink(
-                    destination: ThreadDetailView(thread: selectedThread),
-                    isActive: selectedThreadIsActive
+                    destination: ThreadDetailView(thread: navigationThread),
+                    isActive: notificationThreadIsActive
                 ) {
                     EmptyView()
                 }
@@ -95,9 +95,7 @@ struct SummaryView: View {
                         }
                     } else {
                         ForEach(summary.threads) { thread in
-                            Button {
-                                Task { await store.select(thread) }
-                            } label: {
+                            NavigationLink(destination: ThreadDetailView(thread: thread)) {
                                 ThreadRow(thread: thread)
                             }
                         }
@@ -124,11 +122,12 @@ struct SummaryView: View {
         }
     }
 
-    private var selectedThreadIsActive: Binding<Bool> {
+    private var notificationThreadIsActive: Binding<Bool> {
         Binding(
-            get: { store.selectedThread != nil },
+            get: { store.navigationThread != nil },
             set: { isActive in
                 if !isActive {
+                    store.navigationThread = nil
                     store.selectedThread = nil
                     store.transcript = nil
                 }

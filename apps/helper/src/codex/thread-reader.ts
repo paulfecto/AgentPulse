@@ -131,7 +131,6 @@ export class CodexThreadReader {
       select id, substr(coalesce(title, ''), 1, 240) as title, cwd, source, updated_at_ms, archived, rollout_path, model, reasoning_effort
       from threads
       where archived = 0
-        and (source is null or source in ('vscode', 'cli', 'exec', 'appServer', 'unknown'))
       order by updated_at_ms desc
       limit ${this.maxThreads};
     `;
@@ -209,8 +208,11 @@ export class CodexThreadReader {
     entries: VisibleThreadEntry[];
   }> {
     const sidebarState = await this.readSidebarState();
+    const userFacingRows = (await this.readSqliteRows()).filter((row) =>
+      isCodexUserFacingThreadRow(row, sidebarState, this.chatRoot)
+    );
     const rows = limitCodexRowsByWorkspace(
-      await this.readSqliteRows(),
+      userFacingRows,
       sidebarState,
       options.defaultLimit ?? this.maxIdleThreadsPerProject,
       options.groupLimits,
@@ -381,6 +383,33 @@ function threadGroupLimit(
 
 export function isUserFacingThreadSource(source: string | undefined): boolean {
   return !source || ['vscode', 'cli', 'exec', 'appServer', 'unknown'].includes(source);
+}
+
+export function isCodexUserFacingThreadRow(
+  row: Pick<SqliteThreadRow, 'id' | 'title' | 'cwd' | 'source'>,
+  sidebarState: CodexSidebarState,
+  chatRoot?: string
+): boolean {
+  return isUserFacingThreadSource(row.source) && !isGeneratedProjectAnchorThread(row, sidebarState, chatRoot);
+}
+
+function isGeneratedProjectAnchorThread(
+  row: Pick<SqliteThreadRow, 'id' | 'title' | 'cwd'>,
+  sidebarState: CodexSidebarState,
+  chatRoot?: string
+): boolean {
+  if (isCodexChatWorkspaceRoot(row.cwd, chatRoot)) {
+    return false;
+  }
+
+  const title = row.title.trim().toLowerCase();
+  if (!title.endsWith(' project anchor')) {
+    return false;
+  }
+
+  const workspaceRoot = resolveThreadWorkspaceRoot(row, sidebarState);
+  const expectedTitle = `${workspaceNameFromCwd(workspaceRoot)} project anchor`.toLowerCase();
+  return title === expectedTitle;
 }
 
 export function mapSqliteThreadRow(row: SqliteThreadRow, workspaceRoot = row.cwd): Thread {

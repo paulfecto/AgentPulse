@@ -9,10 +9,14 @@ final class AgentPulseStore: ObservableObject {
     @Published private(set) var session: AgentPulseSession?
     @Published var summary: WatchSummaryResponse?
     @Published var selectedThread: WatchThread?
+    @Published var navigationThread: WatchThread?
     @Published var transcript: ThreadTranscript?
     @Published var isLoading = false
+    @Published var isLoadingOlderMessages = false
+    @Published var hasOlderMessages = false
     @Published var errorMessage: String?
 
+    private let transcriptPageLimit = 40
     private let keychain = KeychainStore()
 
     private init() {
@@ -102,7 +106,44 @@ final class AgentPulseStore: ObservableObject {
         guard let session else { return }
         errorMessage = nil
         do {
-            transcript = try await AgentPulseClient(session: session).transcript(threadId: threadId)
+            let nextTranscript = try await AgentPulseClient(session: session).transcript(
+                threadId: threadId,
+                limit: transcriptPageLimit
+            )
+            transcript = nextTranscript
+            hasOlderMessages = nextTranscript.messages.count >= transcriptPageLimit
+        } catch {
+            handle(error)
+        }
+    }
+
+    func loadOlderMessagesIfNeeded(currentMessageId: String? = nil) async {
+        guard !isLoadingOlderMessages, hasOlderMessages, let session, let currentTranscript = transcript else {
+            return
+        }
+        guard let oldestMessage = currentTranscript.messages.first else {
+            hasOlderMessages = false
+            return
+        }
+        if let currentMessageId, currentMessageId != oldestMessage.id {
+            return
+        }
+
+        isLoadingOlderMessages = true
+        defer { isLoadingOlderMessages = false }
+        do {
+            let older = try await AgentPulseClient(session: session).olderMessages(
+                threadId: currentTranscript.threadId,
+                before: oldestMessage.id,
+                limit: transcriptPageLimit
+            )
+            let existingIds = Set(currentTranscript.messages.map(\.id))
+            let nextOlderMessages = older.messages.filter { !existingIds.contains($0.id) }
+            transcript = ThreadTranscript(
+                threadId: currentTranscript.threadId,
+                messages: nextOlderMessages + currentTranscript.messages
+            )
+            hasOlderMessages = older.hasMore
         } catch {
             handle(error)
         }
@@ -111,6 +152,7 @@ final class AgentPulseStore: ObservableObject {
     func select(_ thread: WatchThread) async {
         selectedThread = thread
         transcript = nil
+        hasOlderMessages = false
         await loadThread(thread.threadId)
     }
 
@@ -170,13 +212,16 @@ final class AgentPulseStore: ObservableObject {
         session = nil
         summary = nil
         selectedThread = nil
+        navigationThread = nil
         transcript = nil
+        hasOlderMessages = false
         errorMessage = nil
     }
 
     func openFromNotification(threadId: String) async {
         await refresh()
         if let thread = summary?.threads.first(where: { $0.threadId == threadId }) {
+            navigationThread = thread
             await select(thread)
         }
     }

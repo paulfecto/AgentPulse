@@ -37,11 +37,22 @@ final class AgentPulseClient {
         try await get("/watch/summary", as: WatchSummaryResponse.self)
     }
 
-    func transcript(threadId: String) async throws -> ThreadTranscript {
+    func transcript(threadId: String, limit: Int = 40) async throws -> ThreadTranscript {
         guard let encoded = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw AgentPulseWatchError.server("Invalid thread id.")
         }
-        return try await get("/threads/\(encoded)/transcript?view=watch", as: ThreadTranscript.self)
+        return try await get("/threads/\(encoded)/transcript?limit=\(limit)", as: ThreadTranscript.self)
+    }
+
+    func olderMessages(threadId: String, before messageId: String, limit: Int = 40) async throws -> OlderThreadMessagesResponse {
+        guard let encodedThreadId = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let encodedMessageId = messageId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            throw AgentPulseWatchError.server("Invalid thread or message id.")
+        }
+        return try await get(
+            "/threads/\(encodedThreadId)/transcript/older?before=\(encodedMessageId)&limit=\(limit)",
+            as: OlderThreadMessagesResponse.self
+        )
     }
 
     func sendReply(threadId: String, text: String) async throws {
