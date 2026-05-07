@@ -70,6 +70,9 @@ export class CloudflareTunnelSupervisor {
   }
 
   getStatus(): RemoteAccessSettings {
+    if (this.remoteMode() === 'edge') {
+      return this.sharedEdgeStatus();
+    }
     return this.settings.remoteAccess;
   }
 
@@ -596,20 +599,28 @@ export class CloudflareTunnelSupervisor {
   }
 
   private async checkSharedEdge(): Promise<RemoteAccessSettings> {
+    return this.updateRemoteAccess({
+      ...this.sharedEdgeStatus(),
+      lastCheckedAt: this.isoNow()
+    });
+  }
+
+  private sharedEdgeStatus(): RemoteAccessSettings {
     const configured = this.isConfigured();
     const enabled = this.settings.remoteAccess.enabled;
-    return this.updateRemoteAccess({
+    return {
+      ...this.settings.remoteAccess,
       status: enabled ? (configured ? 'healthy' : 'disconnected') : 'off',
-      lastCheckedAt: this.isoNow(),
       lastError: configured ? '' : 'Configure the shared beta public URL before enabling remote access.',
       checklist: {
+        ...this.settings.remoteAccess.checklist,
         dependencyInstalled: true,
         authenticated: true,
         configured,
         tunnelRunning: enabled && configured,
         hostnameAssigned: configured
       }
-    });
+    };
   }
 }
 

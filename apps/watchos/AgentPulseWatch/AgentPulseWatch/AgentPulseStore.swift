@@ -248,11 +248,11 @@ final class AgentPulseStore: ObservableObject {
     }
 
     private func persistStableRemoteSession(from summary: WatchSummaryResponse) {
+        let stableModes = Set(["named", "edge"])
         guard
             let session,
             summary.remoteAccess.enabled,
-            summary.remoteAccess.mode == "named",
-            summary.remoteAccess.status == "connected",
+            stableModes.contains(summary.remoteAccess.mode),
             let remoteUrl = summary.server.remoteUrl?.trimmedNonEmpty,
             remoteUrl.hasPrefix("https://"),
             session.baseUrl.trimmedSlash() != remoteUrl.trimmedSlash()

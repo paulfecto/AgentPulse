@@ -171,6 +171,16 @@ describe('CloudflareTunnelSupervisor', () => {
     const checked = await supervisor.check();
     const enabled = await supervisor.setEnabled(true);
 
+    expect(supervisor.getStatus()).toMatchObject({
+      status: 'healthy',
+      checklist: {
+        dependencyInstalled: true,
+        authenticated: true,
+        configured: true,
+        tunnelRunning: true,
+        hostnameAssigned: true
+      }
+    });
     expect(checked).toMatchObject({
       status: 'healthy',
       checklist: {

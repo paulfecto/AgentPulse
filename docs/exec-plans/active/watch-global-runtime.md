@@ -283,6 +283,38 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
     test; Docker targeted Vitest for deploy scripts; Docker full `pnpm test`
     (35 files, 467 tests), `pnpm typecheck`, and `pnpm build`.
 
+- Watch shared-edge health/install repair, 2026-05-08:
+  - root cause: the live helper settings were valid for shared-edge mode, but
+    `CloudflareTunnelSupervisor.getStatus()` returned the stale stored
+    `disconnected` status until an explicit remote check ran; the Watch app
+    also only auto-persisted stable remotes for `mode = "named"` and therefore
+    did not treat `https://beta.dope-ai.kr/agent-pulse` as the canonical edge
+    route.
+  - implementation: shared-edge `getStatus()` now returns a normalized
+    externally-managed healthy status when hostname and public URL are
+    configured; the Watch pairing screen defaults to
+    `https://beta.dope-ai.kr/agent-pulse`; and Watch session migration accepts
+    both `named` and `edge` stable HTTPS remotes.
+  - runtime proof after rebuilding only `apps/helper/dist/dev-server.js` and
+    kickstarting only `com.agentpulse.helper.55110.beta-edge`:
+    `http://127.0.0.1:55110/health/get` and
+    `https://beta.dope-ai.kr/agent-pulse/health/get` both returned
+    `codexAppServer: "connected"` and
+    `remoteAccess.status: "healthy"` with
+    `publicUrl: "https://beta.dope-ai.kr/agent-pulse"`;
+    `https://beta.dope-ai.kr/project-manager/health` still returned `healthy`.
+  - Watch proof: Xcode saw `Paul’s Apple Watch` as `available (paired)`;
+    simulator build passed with signing disabled; physical Watch build passed
+    with `DEVELOPMENT_TEAM=H86Z687FT6`; `devicectl` installed and launched
+    bundle `com.paulfecto.AgentPulse.watchkitapp`; the helper keychain device
+    record for `Apple Watch` updated `lastSeenAt` to
+    `2026-05-07T23:46:03.587Z` and refreshed a sandbox watch push token at
+    `2026-05-07T23:46:03.714Z`.
+  - validation passed: targeted Docker Vitest for shared-edge status and
+    Watch summary seams; full Docker `pnpm test` (35 files, 467 tests),
+    Docker `pnpm typecheck`, Docker `pnpm build`, and Xcode watchOS simulator
+    build.
+
 ## TDD evidence
 
 - red signal: the first targeted Docker run exposed missing named-tunnel login
@@ -324,9 +356,10 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
 
 ## Completion status
 
-- state: public-beta-route-live.
+- state: watch-beta-edge-current.
 - ready for Watch pairing: `https://beta.dope-ai.kr/agent-pulse` now reaches
-  Agent Pulse over the macmini3 shared edge. APNs proof still requires Apple
+  Agent Pulse over the macmini3 shared edge, and the physical Watch has the
+  current build installed and launched. APNs sender proof still requires Apple
   APNs secrets.
 
 ## Frontier routing

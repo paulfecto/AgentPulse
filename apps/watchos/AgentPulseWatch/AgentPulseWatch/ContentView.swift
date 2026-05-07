@@ -25,7 +25,7 @@ struct ContentView: View {
 
 struct PairingView: View {
     @EnvironmentObject private var store: AgentPulseStore
-    @State private var baseUrl = ""
+    @State private var baseUrl = "https://beta.dope-ai.kr/agent-pulse"
     @State private var pin = ""
 
     var body: some View {
