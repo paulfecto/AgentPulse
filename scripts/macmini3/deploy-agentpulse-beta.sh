@@ -51,18 +51,26 @@ wait_for_url_contains() {
 }
 
 assert_project_manager_health() {
-  local pm_health root_health
-  pm_health="$(request_body "https://beta.dope-ai.kr/project-manager/health")"
-  if ! printf '%s' "$pm_health" | grep -qi 'healthy'; then
-    echo "Project Manager health failed; refusing to touch shared beta edge." >&2
-    printf '%s\n' "$pm_health" >&2
+  local pm_health root_health local_root_health local_project_manager_health
+  if pm_health="$(request_body "https://beta.dope-ai.kr/project-manager/health" 2>/dev/null)" &&
+    printf '%s' "$pm_health" | grep -qi 'healthy' &&
+    root_health="$(request_body "https://beta.dope-ai.kr/health" 2>/dev/null)" &&
+    printf '%s' "$root_health" | grep -qi 'healthy'; then
+    return 0
+  fi
+
+  log "Public beta health is not reachable from macmini3; checking local shared-edge health instead."
+  local_project_manager_health="$(request_body "http://127.0.0.1:4344/health")"
+  if ! printf '%s' "$local_project_manager_health" | grep -qi 'healthy'; then
+    echo "Local Project Manager beta health failed; refusing to touch shared beta edge." >&2
+    printf '%s\n' "$local_project_manager_health" >&2
     exit 1
   fi
 
-  root_health="$(request_body "https://beta.dope-ai.kr/health")"
-  if ! printf '%s' "$root_health" | grep -qi 'healthy'; then
-    echo "Shared beta root health failed; refusing to touch shared beta edge." >&2
-    printf '%s\n' "$root_health" >&2
+  local_root_health="$(request_body "http://127.0.0.1/health")"
+  if ! printf '%s' "$local_root_health" | grep -qi 'healthy'; then
+    echo "Local shared beta root health failed; refusing to touch shared beta edge." >&2
+    printf '%s\n' "$local_root_health" >&2
     exit 1
   fi
 }
