@@ -201,13 +201,10 @@ base_path = sys.argv[5].rstrip("/") or "/agent-pulse"
 text = path.read_text(encoding="utf-8")
 begin = "# Agent Pulse beta app proxy BEGIN"
 end = "# Agent Pulse beta app proxy END"
-if begin in text or end in text:
+had_marked_block = begin in text or end in text
+if had_marked_block:
     pattern = re.compile(r"\n?[ \t]*# Agent Pulse beta app proxy BEGIN\n.*?# Agent Pulse beta app proxy END\n?", re.S)
     text = pattern.sub("\n", text)
-else:
-    unmarked = re.search(r"location\s+(?:=|(?:\^~))?\s*/agent-pulse(?:/)?\s*\{", text)
-    if unmarked:
-        raise SystemExit("Refusing to overwrite an unmarked /agent-pulse nginx location.")
 
 server_matches = list(re.finditer(r"(^|\n)(?P<indent>[ \t]*)server[ \t]*\{", text))
 blocks = []
@@ -237,6 +234,10 @@ if not blocks:
 
 blocks.sort(reverse=True)
 _, start, end_index, indent = blocks[0]
+target_body = text[start:end_index + 1]
+if not had_marked_block and re.search(r"location\s+(?:=|(?:\^~))?\s*/agent-pulse(?:/)?\s*\{", target_body):
+    raise SystemExit("Refusing to overwrite an unmarked /agent-pulse nginx location in the target server block.")
+
 inner = indent + "  "
 block = f"""
 {inner}{begin}

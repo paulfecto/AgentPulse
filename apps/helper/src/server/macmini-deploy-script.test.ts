@@ -51,7 +51,7 @@ describe('macmini3 Agent Pulse beta deploy automation', () => {
     expect(reconciler).toContain('location ^~ {base_path}/');
     expect(reconciler).toContain('http://127.0.0.1:${AGENT_PULSE_EDGE_PORT}');
     expect(reconciler).toContain('http://host.docker.internal:${AGENT_PULSE_EDGE_PORT}');
-    expect(reconciler).toContain('Refusing to overwrite an unmarked /agent-pulse nginx location.');
+    expect(reconciler).toContain('Refusing to overwrite an unmarked /agent-pulse nginx location in the target server block.');
     expect(reconciler).toContain('docker exec "$container_name" nginx -t');
     expect(reconciler).toContain('nginx -t');
     expect(reconciler).not.toContain('docker restart internal-management');
