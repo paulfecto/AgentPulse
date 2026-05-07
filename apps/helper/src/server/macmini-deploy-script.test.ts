@@ -67,6 +67,8 @@ describe('macmini3 Agent Pulse beta deploy automation', () => {
     expect(deploy).toContain('assert_project_manager_health');
     expect(deploy).toContain('http://127.0.0.1:4344/health');
     expect(deploy).toContain('Public beta health is not reachable from macmini3');
+    expect(deploy).toContain('wait_for_public_or_local_agentpulse');
+    expect(deploy).toContain('Public Agent Pulse health is not reachable from macmini3');
     expect(deploy).toContain('bash scripts/macmini3/reconcile-agentpulse-shared-edge.sh');
   });
 });

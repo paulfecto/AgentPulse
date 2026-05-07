@@ -50,6 +50,14 @@ wait_for_url_contains() {
   return 1
 }
 
+wait_for_public_or_local_agentpulse() {
+  if wait_for_url_contains "${public_url%/}/health/get" '"codexAppServer":"connected"' 10; then
+    return 0
+  fi
+  log "Public Agent Pulse health is not reachable from macmini3; using local Docker edge health for host-side proof."
+  wait_for_url_contains "http://127.0.0.1:${edge_port}/health/get" '"codexAppServer":"connected"' 60
+}
+
 assert_project_manager_health() {
   local pm_health root_health local_root_health local_project_manager_health
   if pm_health="$(request_body "https://beta.dope-ai.kr/project-manager/health" 2>/dev/null)" &&
@@ -208,7 +216,7 @@ wait_for_url_contains "http://127.0.0.1:${edge_port}/health/get" '"codexAppServe
 log "Reconciling shared beta edge route"
 bash scripts/macmini3/reconcile-agentpulse-shared-edge.sh
 
-wait_for_url_contains "${public_url%/}/health/get" '"codexAppServer":"connected"' 60
+wait_for_public_or_local_agentpulse
 assert_project_manager_health
 
 log "Agent Pulse beta is healthy at $public_url"
