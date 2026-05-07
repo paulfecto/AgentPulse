@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-helper_url="${AGENT_PULSE_HELPER_URL:-http://127.0.0.1:55110}"
+helper_url="${AGENT_PULSE_HELPER_URL:-http://127.0.0.1:55112}"
 edge_url="${AGENT_PULSE_EDGE_URL:-http://127.0.0.1:4355}"
 public_url="${AGENT_PULSE_PUBLIC_URL:-https://beta.dope-ai.kr/agent-pulse}"
 
@@ -34,8 +34,8 @@ if pgrep -fl '/tmp/fake-bin/codex' >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! pgrep -fl '/Applications/Codex.app/Contents/Resources/codex app-server' >/dev/null 2>&1; then
-  echo "Real Codex app-server process was not found." >&2
+if ! curl --connect-timeout 5 --max-time 20 -fsSL "$edge_url/" >/dev/null; then
+  echo "Agent Pulse tablet shell is not loading through the Docker edge." >&2
   exit 1
 fi
 

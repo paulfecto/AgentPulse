@@ -5,13 +5,17 @@ Public route: `https://beta.dope-ai.kr/agent-pulse`
 This deployment follows the `management-tool` shared beta pattern. The shared
 macmini3 edge owns TLS for `beta.dope-ai.kr`, strips `/agent-pulse/`, and sends
 traffic to the Agent Pulse Docker edge on `127.0.0.1:4355`. The Docker edge
-reverse-proxies to the macOS host helper on `127.0.0.1:55110`.
+serves the built tablet assets locally and reverse-proxies helper API traffic to
+the active Mac relay helper on `127.0.0.1:55112`.
 
 ## Runtime shape
 
-- Host helper: macOS process, because Codex app-server is bundled inside
-  `/Applications/Codex.app`.
+- Helper relay: macOS SSH relay on `55112`, because the real Codex app-server
+  state lives on the Codex desktop Mac, not inside the shared public nginx
+  container.
 - Docker edge: nginx container named `agentpulse-beta-edge`.
+- Docker edge static root: `apps/tablet/dist` mounted read-only at
+  `/usr/share/nginx/html`.
 - Public URL: `https://beta.dope-ai.kr/agent-pulse`.
 - Desktop safety: the helper launcher always sets
   `AGENT_PULSE_DISABLE_CODEX_DESKTOP=1`.

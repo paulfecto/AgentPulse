@@ -68,8 +68,10 @@ describe('dev-run Cloudflare wiring', () => {
     expect(helperScript).toContain('AGENT_PULSE_DISABLE_CODEX_DESKTOP=1');
     expect(compose).toContain('agentpulse-beta-edge');
     expect(compose).toContain('4355');
-    expect(edgeNginx).toContain('host.docker.internal:55110');
-    expect(checkScript).toContain('http://127.0.0.1:55110');
+    expect(compose).toContain('./apps/tablet/dist:/usr/share/nginx/html:ro');
+    expect(edgeNginx).toContain('host.docker.internal:55112');
+    expect(edgeNginx).toContain('root /usr/share/nginx/html');
+    expect(checkScript).toContain('http://127.0.0.1:55112');
     expect(nginx).toContain('location ^~ /agent-pulse/');
     expect(nginx).toContain('proxy_pass http://127.0.0.1:4355/');
   });
