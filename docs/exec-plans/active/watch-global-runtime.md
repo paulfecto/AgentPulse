@@ -259,6 +259,30 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
     tool repo, but GitHub secrets cannot be read back or mirrored without the
     original secret values.
 
+- macmini3 live route repair, 2026-05-08:
+  - reached macmini3 through the existing `rpi5-jumphost` SSH hop and confirmed
+    the live shared edge still returned Project Manager HTML for
+    `https://beta.dope-ai.kr/agent-pulse/health/get` before repair.
+  - confirmed the actual working Agent Pulse helper path on macmini3 is an
+    SSH relay on `127.0.0.1:55112`; the local `55110` LaunchAgent path failed
+    because macmini3 does not expose the Codex app binary expected by the
+    helper. The failed `55110` LaunchAgent was stopped.
+  - reconciled the active shared nginx edge to route `/agent-pulse/` to
+    `agentpulse-beta-edge` on `4355`, preserving Project Manager routes and
+    validating nginx before reload.
+  - changed the Agent Pulse Docker edge to serve `apps/tablet/dist` static
+    files locally and proxy helper/API requests to the working relay helper on
+    `55112`, then recreated only `agentpulse-beta-edge`.
+  - public proof passed:
+    `https://beta.dope-ai.kr/agent-pulse/` serves the Agent Pulse HTML shell,
+    `https://beta.dope-ai.kr/agent-pulse/assets/index-CEM2e0qW.js` returns
+    HTTP 200, `https://beta.dope-ai.kr/agent-pulse/health/get` returns Agent
+    Pulse JSON with `codexAppServer: "connected"`, and
+    `https://beta.dope-ai.kr/project-manager/health` still returns `healthy`.
+  - validation passed: shell syntax and `git diff --check`; Docker nginx config
+    test; Docker targeted Vitest for deploy scripts; Docker full `pnpm test`
+    (35 files, 467 tests), `pnpm typecheck`, and `pnpm build`.
+
 ## TDD evidence
 
 - red signal: the first targeted Docker run exposed missing named-tunnel login
@@ -279,6 +303,9 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
 - deploy automation TDD, 2026-05-06: targeted Docker Vitest first failed on an
   over-specific docs assertion, then passed after matching the wrapped
   validation-failure sentence. Full Docker repo gates passed after that.
+- macmini3 route TDD, 2026-05-08: Docker deploy-script tests were updated to
+  lock the relay-helper/static-edge topology, and full Docker gates passed after
+  the public route was repaired.
 
 ## Review evidence
 
@@ -297,11 +324,10 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
 
 ## Completion status
 
-- state: repo-complete-with-external-secret-blocker.
-- ready for merge or deploy: code and validation are ready. The live macmini3
-  deploy can run as soon as `MACMINI3_HOST`, `MACMINI3_USER`, `MACMINI3_PORT`,
-  and `MACMINI3_PASSWORD` are available in the AgentPulse GitHub repo. APNs
-  proof still requires Apple APNs secrets.
+- state: public-beta-route-live.
+- ready for Watch pairing: `https://beta.dope-ai.kr/agent-pulse` now reaches
+  Agent Pulse over the macmini3 shared edge. APNs proof still requires Apple
+  APNs secrets.
 
 ## Frontier routing
 
