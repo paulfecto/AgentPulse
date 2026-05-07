@@ -16,6 +16,7 @@ log_dir="$HOME/Library/Logs"
 plist_path="$launch_agent_dir/$launch_label.plist"
 stdout_path="$log_dir/$launch_label.log"
 stderr_path="$log_dir/$launch_label.error.log"
+PNPM_COMMAND=()
 
 log() {
   echo "[agent-pulse-beta-deploy] $*"
@@ -84,11 +85,24 @@ assert_project_manager_health() {
 }
 
 ensure_node_runtime() {
+  require_command node
+  if command -v pnpm >/dev/null 2>&1; then
+    PNPM_COMMAND=(pnpm)
+    return 0
+  fi
   if command -v corepack >/dev/null 2>&1; then
     corepack enable >/dev/null 2>&1 || true
+    if command -v pnpm >/dev/null 2>&1; then
+      PNPM_COMMAND=(pnpm)
+      return 0
+    fi
   fi
-  require_command pnpm
-  require_command node
+  require_command npm
+  PNPM_COMMAND=(npm exec --yes pnpm@10.28.2 --)
+}
+
+run_pnpm() {
+  "${PNPM_COMMAND[@]}" "$@"
 }
 
 ensure_launch_agent() {
@@ -188,8 +202,8 @@ fi
 ensure_node_runtime
 
 log "Installing dependencies and building with base path $public_base_path"
-pnpm install --frozen-lockfile
-AGENT_PULSE_PUBLIC_BASE_PATH="$public_base_path" pnpm build
+run_pnpm install --frozen-lockfile
+AGENT_PULSE_PUBLIC_BASE_PATH="$public_base_path" run_pnpm build
 
 log "Writing isolated helper settings"
 AGENT_PULSE_SKIP_BUILD=1 \

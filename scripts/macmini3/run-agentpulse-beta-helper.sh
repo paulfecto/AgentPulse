@@ -17,11 +17,6 @@ log() {
   echo "[agent-pulse-beta-helper] $*"
 }
 
-if ! command -v pnpm >/dev/null 2>&1; then
-  echo "pnpm is required to build Agent Pulse before starting the helper." >&2
-  exit 1
-fi
-
 case "$public_url" in
   https://*) ;;
   *)
@@ -115,6 +110,10 @@ if [[ "${AGENT_PULSE_WRITE_SETTINGS_ONLY:-0}" == "1" ]]; then
 fi
 
 if [[ "${AGENT_PULSE_SKIP_BUILD:-0}" != "1" ]]; then
+  if ! command -v pnpm >/dev/null 2>&1; then
+    echo "pnpm is required to build Agent Pulse before starting the helper." >&2
+    exit 1
+  fi
   log "Building with public base path $public_base_path"
   (cd "$repo_root" && AGENT_PULSE_PUBLIC_BASE_PATH="$public_base_path" pnpm build)
 fi
