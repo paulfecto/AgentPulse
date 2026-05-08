@@ -55,16 +55,17 @@ final class AgentPulseClient {
         )
     }
 
-    func sendReply(threadId: String, text: String) async throws {
+    func sendReply(threadId: String, text: String) async throws -> ThreadMessageResponse {
         guard let encoded = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw AgentPulseWatchError.server("Invalid thread id.")
         }
-        _ = try await request(
+        let data = try await request(
             path: "/threads/\(encoded)/messages",
             method: "POST",
             body: ThreadMessageRequest(text: text),
             watchClient: true
         )
+        return try decoder.decode(ThreadMessageResponse.self, from: data)
     }
 
     func stop(threadId: String) async throws {

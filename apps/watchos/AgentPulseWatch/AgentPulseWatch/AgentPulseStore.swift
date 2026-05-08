@@ -13,10 +13,13 @@ final class AgentPulseStore: ObservableObject {
     @Published var transcript: ThreadTranscript?
     @Published var isLoading = false
     @Published var isLoadingOlderMessages = false
+    @Published var isFollowingRun = false
     @Published var hasOlderMessages = false
     @Published var errorMessage: String?
 
     private let transcriptPageLimit = 40
+    private let runFollowMaxAttempts = 120
+    private let runFollowIntervalNanoseconds: UInt64 = 2_000_000_000
     private let keychain = KeychainStore()
 
     private init() {
@@ -141,6 +144,8 @@ final class AgentPulseStore: ObservableObject {
             let nextOlderMessages = older.messages.filter { !existingIds.contains($0.id) }
             transcript = ThreadTranscript(
                 threadId: currentTranscript.threadId,
+                activeTurnId: currentTranscript.activeTurnId,
+                sendState: currentTranscript.sendState,
                 messages: nextOlderMessages + currentTranscript.messages
             )
             hasOlderMessages = older.hasMore
@@ -160,9 +165,11 @@ final class AgentPulseStore: ObservableObject {
         guard let session, let thread = selectedThread else { return }
         errorMessage = nil
         do {
-            try await AgentPulseClient(session: session).sendReply(threadId: thread.threadId, text: text)
-            await loadThread(thread.threadId)
+            let response = try await AgentPulseClient(session: session).sendReply(threadId: thread.threadId, text: text)
+            transcript = response.transcript
+            hasOlderMessages = response.transcript.messages.count >= transcriptPageLimit
             await refresh()
+            await followSelectedThreadUntilSettled(threadId: thread.threadId)
         } catch {
             handle(error)
         }
@@ -216,6 +223,48 @@ final class AgentPulseStore: ObservableObject {
         transcript = nil
         hasOlderMessages = false
         errorMessage = nil
+    }
+
+    private func followSelectedThreadUntilSettled(threadId: String) async {
+        guard session != nil else { return }
+        guard shouldKeepFollowingSelectedRun(threadId: threadId) else { return }
+
+        isFollowingRun = true
+        defer { isFollowingRun = false }
+
+        for _ in 0..<runFollowMaxAttempts {
+            do {
+                try await Task.sleep(nanoseconds: runFollowIntervalNanoseconds)
+            } catch {
+                return
+            }
+
+            guard selectedThread?.threadId == threadId else { return }
+            await refresh()
+            guard shouldKeepFollowingSelectedRun(threadId: threadId) else { return }
+        }
+    }
+
+    private func shouldKeepFollowingSelectedRun(threadId: String) -> Bool {
+        guard selectedThread?.threadId == threadId else { return false }
+
+        if transcript?.activeTurnId?.isEmpty == false {
+            return true
+        }
+
+        switch transcript?.sendState?.reason {
+        case "thread_changed", "missing_active_turn", "compacting_context":
+            return true
+        default:
+            break
+        }
+
+        switch selectedThread?.status {
+        case .running, .compacting:
+            return true
+        default:
+            return false
+        }
     }
 
     func openFromNotification(threadId: String) async {

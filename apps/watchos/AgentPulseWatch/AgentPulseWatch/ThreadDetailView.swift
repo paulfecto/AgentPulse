@@ -23,6 +23,14 @@ struct ThreadDetailView: View {
             }
             Section("Messages") {
                 if let transcript = store.transcript {
+                    if store.isFollowingRun {
+                        HStack {
+                            ProgressView()
+                            Text("Waiting for outcome")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                     if store.hasOlderMessages {
                         HStack {
                             Spacer()

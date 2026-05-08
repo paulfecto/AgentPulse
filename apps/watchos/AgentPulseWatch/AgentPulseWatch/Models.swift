@@ -72,7 +72,34 @@ struct WatchThread: Identifiable, Decodable, Hashable {
 
 struct ThreadTranscript: Decodable {
     let threadId: String
+    let activeTurnId: String?
+    let sendState: ThreadSendState?
     let messages: [ChatMessage]
+
+    init(
+        threadId: String,
+        activeTurnId: String? = nil,
+        sendState: ThreadSendState? = nil,
+        messages: [ChatMessage]
+    ) {
+        self.threadId = threadId
+        self.activeTurnId = activeTurnId
+        self.sendState = sendState
+        self.messages = messages
+    }
+}
+
+struct ThreadSendState: Decodable {
+    let canSend: Bool
+    let reason: String
+    let label: String
+}
+
+struct ThreadMessageResponse: Decodable {
+    let ok: Bool
+    let mode: String
+    let turnId: String?
+    let transcript: ThreadTranscript
 }
 
 struct OlderThreadMessagesResponse: Decodable {

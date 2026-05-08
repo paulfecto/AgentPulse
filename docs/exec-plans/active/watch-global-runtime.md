@@ -319,6 +319,42 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
     `device:68ab43e5-b1d5-4ac8-8af6-b8fe9747007c` refreshed
     `lastSeenAt = 2026-05-08T00:12:08.426Z`.
 
+- Watch send follow-through, 2026-05-08:
+  - original failing signal: after replying from Apple Watch, the Watch could
+    show early reasoning/activity but no final outcome, and Codex Desktop did
+    not visibly change.
+  - runtime diagnosis: the helper was correctly running in Codex-safe mode with
+    `AGENT_PULSE_DISABLE_CODEX_DESKTOP=1`, so the desktop window is not focused,
+    opened, or IPC-controlled. The reply path uses the real spawned Codex
+    app-server transport.
+  - product root cause: the Watch client discarded the
+    `/threads/:threadId/messages` response transcript, did one immediate reload,
+    and then stopped. For real Codex runs, that immediate reload can occur while
+    the turn only has reasoning/activity events, before the assistant outcome is
+    committed.
+  - fix: Watch `sendReply` now decodes `ThreadMessageResponse`, installs the
+    returned transcript immediately, and follows the selected thread every two
+    seconds until the transcript/thread settles or the user navigates away.
+    Older-message pagination preserves active-run metadata while that follow
+    loop is running.
+  - Watch UI now displays a compact `Waiting for outcome` row while the follow
+    loop is active.
+  - Xcode validation passed:
+    `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild
+    -project apps/watchos/AgentPulseWatch/AgentPulseWatch.xcodeproj -scheme
+    AgentPulseWatch -destination 'generic/platform=watchOS Simulator'
+    -derivedDataPath /tmp/agentpulse-watch-follow-sim CODE_SIGNING_ALLOWED=NO
+    build`.
+  - physical Watch build/install/launch passed for device
+    `E8FAD98B-82EA-5852-A29A-32F306E17758` with development team
+    `H86Z687FT6`.
+  - cleanup: removed `/tmp/agentpulse-watch-follow-sim` and
+    `/tmp/agentpulse-watch-follow-device`.
+  - Watch device proof: keychain record
+    `device:68ab43e5-b1d5-4ac8-8af6-b8fe9747007c` refreshed
+    `lastSeenAt = 2026-05-08T00:30:53.710Z` and retained sandbox push token
+    registration for `com.paulfecto.AgentPulse.watchkitapp`.
+
 - macmini3 live route repair, 2026-05-08:
   - reached macmini3 through the existing `rpi5-jumphost` SSH hop and confirmed
     the live shared edge still returned Project Manager HTML for
