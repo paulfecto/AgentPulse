@@ -143,6 +143,7 @@ const AUTO_DESKTOP_REFRESH_SETTLE_MS = 800;
 const AUTO_DESKTOP_REFRESH_COOLDOWN_MS = 10_000;
 const MAX_THREADS_PER_PROJECT = 6;
 const MAX_EXPANDED_THREADS_PER_PROJECT = 120;
+const MAX_WATCH_SUMMARY_THREADS = 32;
 const MAX_OUTGOING_ATTACHMENTS = 6;
 const MAX_OUTGOING_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_OUTGOING_ATTACHMENT_TOTAL_BYTES = 16 * 1024 * 1024;
@@ -1616,13 +1617,21 @@ function createApp(
     const statusRank = new Map(THREAD_STATUS_PRIORITY.map((status, index) => [status, index]));
     const compactThreads = [...watchThreads]
       .sort((left, right) => {
+        const pinnedDelta = Number(right.pinned === true) - Number(left.pinned === true);
+        if (pinnedDelta !== 0) return pinnedDelta;
+        if (left.pinned && right.pinned) {
+          const orderDelta = (left.pinnedOrder ?? Number.MAX_SAFE_INTEGER) -
+            (right.pinnedOrder ?? Number.MAX_SAFE_INTEGER);
+          if (orderDelta !== 0) return orderDelta;
+        }
+
         const statusDelta =
           (statusRank.get(left.status) ?? THREAD_STATUS_PRIORITY.length) -
           (statusRank.get(right.status) ?? THREAD_STATUS_PRIORITY.length);
         if (statusDelta !== 0) return statusDelta;
         return Date.parse(right.lastActivityAt) - Date.parse(left.lastActivityAt);
       })
-      .slice(0, 12)
+      .slice(0, MAX_WATCH_SUMMARY_THREADS)
       .map((thread) => ({
         threadId: thread.threadId,
         provider: thread.provider,
@@ -1632,7 +1641,9 @@ function createApp(
         workspaceKind: thread.workspaceKind,
         status: thread.status,
         lastActivityAt: thread.lastActivityAt,
-        lastTurnSummary: thread.lastTurnSummary
+        lastTurnSummary: thread.lastTurnSummary,
+        ...(thread.pinned ? { pinned: true } : {}),
+        ...(thread.pinnedOrder !== undefined ? { pinnedOrder: thread.pinnedOrder } : {})
       }));
 
     return context.json(
@@ -5843,7 +5854,14 @@ function limitThreadsPerProject(
 
   for (const [groupKey, group] of grouped.entries()) {
     const limit = groupLimits.get(groupKey) ?? defaultLimit;
-    const visibleThreads = sortThreadsByActivity(group).slice(0, limit);
+    const pinnedThreads = group
+      .filter((thread) => thread.pinned)
+      .sort((a, b) => (a.pinnedOrder ?? Number.MAX_SAFE_INTEGER) - (b.pinnedOrder ?? Number.MAX_SAFE_INTEGER));
+    const unpinnedThreads = sortThreadsByActivity(group.filter((thread) => !thread.pinned));
+    const visibleThreads = [
+      ...pinnedThreads,
+      ...unpinnedThreads.slice(0, Math.max(0, limit - pinnedThreads.length))
+    ];
     for (const thread of visibleThreads) {
       allowedThreadIds.add(thread.threadId);
     }

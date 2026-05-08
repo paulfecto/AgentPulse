@@ -55,6 +55,8 @@ export type CodexSidebarState = {
   savedWorkspaceRoots: string[];
   activeWorkspaceRoots: string[];
   projectlessThreadIds: Set<string>;
+  pinnedThreadIds: string[];
+  pinnedProjectIds: string[];
   projectOrder: string[];
   threadWorkspaceRootHints: Record<string, string>;
 };
@@ -325,6 +327,10 @@ export function limitCodexSidebarHistory(
   const idleCounts = new Map<string, number>();
 
   return threads.filter((thread) => {
+    if (thread.pinned) {
+      return true;
+    }
+
     if (thread.status !== 'idle' && thread.status !== 'unknown') {
       return true;
     }
@@ -352,6 +358,10 @@ function limitCodexRowsByWorkspace(
 ): SqliteThreadRow[] {
   const counts = new Map<string, number>();
   return rows.filter((row) => {
+    if (sidebarState.pinnedThreadIds.includes(row.id)) {
+      return true;
+    }
+
     const workspaceRoot = resolveThreadWorkspaceRoot(row, sidebarState);
     const key = isCodexChatWorkspaceRoot(workspaceRoot, chatRoot)
       ? 'agent-pulse-chats'
@@ -435,7 +445,11 @@ function decorateCodexChatThread(
   sidebarState: CodexSidebarState,
   chatRoot?: string
 ): Thread {
-  const sharedThread = decorateSharedChatThread(thread, chatRoot);
+  const sharedThread = withSidebarThreadMetadata(
+    decorateSharedChatThread(thread, chatRoot),
+    row,
+    sidebarState
+  );
   if (
     sharedThread.workspaceKind === 'chat' ||
     isCodexChatWorkspaceRoot(row.cwd, chatRoot) ||
@@ -450,6 +464,23 @@ function decorateCodexChatThread(
   }
 
   return sharedThread;
+}
+
+function withSidebarThreadMetadata(
+  thread: Thread,
+  row: Pick<SqliteThreadRow, 'id'>,
+  sidebarState: CodexSidebarState
+): Thread {
+  const pinnedOrder = sidebarState.pinnedThreadIds.indexOf(row.id);
+  if (pinnedOrder < 0) {
+    return thread;
+  }
+
+  return ThreadSchema.parse({
+    ...thread,
+    pinned: true,
+    pinnedOrder
+  });
 }
 
 function isCodexChatWorkspaceRoot(candidate: string | undefined, chatRoot?: string): boolean {
@@ -744,6 +775,8 @@ export function parseCodexSidebarState(content: string): CodexSidebarState {
       savedWorkspaceRoots: readStringArray(parsed['electron-saved-workspace-roots']),
       activeWorkspaceRoots: readStringArray(parsed['active-workspace-roots']),
       projectlessThreadIds: new Set(readStringArray(parsed['projectless-thread-ids'])),
+      pinnedThreadIds: readStringArray(parsed['pinned-thread-ids']),
+      pinnedProjectIds: readStringArray(parsed['pinned-project-ids']),
       projectOrder: readStringArray(parsed['project-order']),
       threadWorkspaceRootHints: readStringRecord(parsed['thread-workspace-root-hints'])
     };
@@ -757,6 +790,8 @@ function emptyCodexSidebarState(): CodexSidebarState {
     savedWorkspaceRoots: [],
     activeWorkspaceRoots: [],
     projectlessThreadIds: new Set(),
+    pinnedThreadIds: [],
+    pinnedProjectIds: [],
     projectOrder: [],
     threadWorkspaceRootHints: {}
   };

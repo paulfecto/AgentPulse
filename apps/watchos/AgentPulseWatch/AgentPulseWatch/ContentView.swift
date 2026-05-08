@@ -156,6 +156,12 @@ struct ThreadRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 StatusDot(status: thread.status.rawValue)
+                if thread.pinned == true {
+                    Image(systemName: "pin.fill")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .accessibilityLabel("Pinned")
+                }
                 Text(thread.title)
                     .lineLimit(2)
             }

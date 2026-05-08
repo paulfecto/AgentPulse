@@ -64,6 +64,8 @@ struct WatchThread: Identifiable, Decodable, Hashable {
     let status: WatchStatus
     let lastActivityAt: String
     let lastTurnSummary: String
+    let pinned: Bool?
+    let pinnedOrder: Int?
 
     var id: String { threadId }
 }

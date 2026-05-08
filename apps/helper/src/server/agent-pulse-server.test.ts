@@ -816,6 +816,18 @@ describe('Agent Pulse helper API', () => {
     const pairing = new PairingManager(registry);
     const threads: Thread[] = [
       {
+        threadId: 'pinned-old',
+        provider: 'codex',
+        title: 'Pinned old',
+        workspace: 'AgentPulse',
+        workspacePath: '/private/provider/path',
+        status: 'idle',
+        lastActivityAt: '2026-05-01T01:00:00Z',
+        lastTurnSummary: 'Pinned.',
+        pinned: true,
+        pinnedOrder: 0
+      },
+      {
         threadId: 'idle-new',
         provider: 'codex',
         title: 'Recent idle',
@@ -894,12 +906,73 @@ describe('Agent Pulse helper API', () => {
         }
       });
       expect(body.threads.map((thread: { threadId: string }) => thread.threadId)).toEqual([
+        'pinned-old',
         'waiting-old',
         'running-mid',
         'idle-new'
       ]);
+      expect(body.threads[0]).toMatchObject({ pinned: true, pinnedOrder: 0 });
       expect(body.threads[0]).not.toHaveProperty('workspacePath');
       expect(body.threads[0]).not.toHaveProperty('model');
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('keeps Codex pinned threads in pinned order beyond the old twelve-row watch cap', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const pinnedThreads: Thread[] = Array.from({ length: 14 }, (_, index) => ({
+      threadId: `pinned-${index}`,
+      provider: 'codex' as const,
+      title: `Pinned ${index}`,
+      workspace: 'AgentPulse',
+      workspacePath: '/private/provider/path',
+      status: 'idle' as const,
+      lastActivityAt: `2026-04-${String(index + 1).padStart(2, '0')}T01:00:00Z`,
+      lastTurnSummary: 'Pinned.',
+      pinned: true,
+      pinnedOrder: index
+    }));
+    const recentUnpinned: Thread = {
+      threadId: 'recent-unpinned',
+      provider: 'codex',
+      title: 'Recent unpinned',
+      workspace: 'AgentPulse',
+      workspacePath: '/private/provider/path',
+      status: 'idle',
+      lastActivityAt: '2026-05-05T02:00:00Z',
+      lastTurnSummary: 'Recent.'
+    };
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: false,
+      remoteAccess: remoteAccessSettings()
+    };
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore: { save: vi.fn(), load: vi.fn() } as unknown as HelperSettingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: { listThreads: async () => [recentUnpinned, ...pinnedThreads] },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      const response = await fetch(`${server.url}/watch/summary`, {
+        headers: authHeaders(token, deviceId)
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.threads).toHaveLength(14);
+      expect(body.threads.slice(0, 14).map((thread: { threadId: string }) => thread.threadId)).toEqual(
+        pinnedThreads.map((thread) => thread.threadId)
+      );
     } finally {
       await server.stop();
     }

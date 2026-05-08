@@ -46,6 +46,8 @@ export const ThreadSchema = z.object({
   status: ThreadStatusSchema,
   lastActivityAt: isoUtcTimestamp,
   lastTurnSummary: z.string(),
+  pinned: z.boolean().optional(),
+  pinnedOrder: z.number().int().nonnegative().optional(),
   model: z.string().optional(),
   reasoningEffort: z.string().optional()
 });
@@ -471,7 +473,9 @@ export const WatchSummaryThreadSchema = ThreadSchema.pick({
   workspaceKind: true,
   status: true,
   lastActivityAt: true,
-  lastTurnSummary: true
+  lastTurnSummary: true,
+  pinned: true,
+  pinnedOrder: true
 });
 
 export type WatchSummaryThread = z.input<typeof WatchSummaryThreadSchema>;
@@ -494,7 +498,7 @@ export const WatchSummaryResponseSchema = z.object({
     canOpenOnMac: z.boolean(),
     openOnMacReason: z.string().min(1).optional()
   }),
-  threads: z.array(WatchSummaryThreadSchema).max(12)
+  threads: z.array(WatchSummaryThreadSchema).max(32)
 });
 
 export type WatchSummaryResponse = z.input<typeof WatchSummaryResponseSchema>;

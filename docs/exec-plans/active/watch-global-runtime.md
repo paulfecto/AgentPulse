@@ -259,6 +259,37 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
     tool repo, but GitHub secrets cannot be read back or mirrored without the
     original secret values.
 
+- Watch pinned-thread convergence, 2026-05-08:
+  - root cause: `/watch/summary` used Codex-visible thread filtering but did
+    not read `pinned-thread-ids` from Codex global state, so the Watch list was
+    recent/status-sorted rather than matching the user's pinned Codex sidebar.
+  - fix: Codex thread reader now carries pinned metadata from
+    `~/.codex/.codex-global-state.json`; helper list limiting preserves pinned
+    threads; Watch summary sorts pinned rows first by pinned order and returns
+    up to 32 compact rows.
+  - Watch app build includes pinned metadata in `WatchThread` and marks pinned
+    rows with `pin.fill`.
+  - targeted Docker tests passed for pinned Codex summary behavior and Codex
+    thread-reader pinned state parsing.
+  - full Docker gates passed: `pnpm test` (35 files, 468 tests),
+    `pnpm typecheck`, and `pnpm build`.
+  - Xcode simulator build passed with signing disabled using
+    `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+  - physical Watch build, install, and launch passed for device
+    `E8FAD98B-82EA-5852-A29A-32F306E17758` with development team
+    `H86Z687FT6`.
+  - public runtime proof: `https://beta.dope-ai.kr/agent-pulse/health/get`
+    reports `codexAppServer = "connected"` and
+    `remoteAccess.publicUrl = "https://beta.dope-ai.kr/agent-pulse"`.
+  - public Watch flow proof: authenticated
+    `https://beta.dope-ai.kr/agent-pulse/watch/summary` returned
+    `remoteUrl = "https://beta.dope-ai.kr/agent-pulse"`, 32 threads, first 18
+    rows pinned, pinned orders `0..17`, and first unpinned row at index 18.
+  - Watch device proof: keychain record
+    `device:68ab43e5-b1d5-4ac8-8af6-b8fe9747007c` refreshed
+    `lastSeenAt = 2026-05-08T00:01:19.951Z` and retained sandbox push token
+    registration for `com.paulfecto.AgentPulse.watchkitapp`.
+
 - macmini3 live route repair, 2026-05-08:
   - reached macmini3 through the existing `rpi5-jumphost` SSH hop and confirmed
     the live shared edge still returned Project Manager HTML for

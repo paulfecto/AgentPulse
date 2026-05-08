@@ -186,6 +186,8 @@ describe('Codex thread reader', () => {
         ],
         'active-workspace-roots': ['/Users/me/projects/AgentPulse'],
         'projectless-thread-ids': ['thread-projectless'],
+        'pinned-thread-ids': ['thread-pinned'],
+        'pinned-project-ids': ['project-pinned'],
         'project-order': ['/Users/me/projects/OpenAssist', '/Users/me/projects/AgentPulse'],
         'thread-workspace-root-hints': {
           'thread-hinted': '/Users/me/projects/OpenAssist'
@@ -199,6 +201,8 @@ describe('Codex thread reader', () => {
     ]);
     expect(sidebar.activeWorkspaceRoots).toEqual(['/Users/me/projects/AgentPulse']);
     expect(sidebar.projectlessThreadIds.has('thread-projectless')).toBe(true);
+    expect(sidebar.pinnedThreadIds).toEqual(['thread-pinned']);
+    expect(sidebar.pinnedProjectIds).toEqual(['project-pinned']);
     expect(sidebar.projectOrder).toEqual([
       '/Users/me/projects/OpenAssist',
       '/Users/me/projects/AgentPulse'
@@ -570,6 +574,16 @@ describe('Codex thread reader', () => {
     const visible = limitCodexSidebarHistory(
       [
         {
+          threadId: 'pinned-old',
+          title: 'Pinned old',
+          workspace: 'OpenAssist',
+          status: 'idle',
+          lastActivityAt: '2026-04-01T15:00:00Z',
+          lastTurnSummary: '',
+          pinned: true,
+          pinnedOrder: 0
+        },
+        {
           threadId: 'live-1',
           title: 'Running now',
           workspace: 'OpenAssist',
@@ -590,6 +604,7 @@ describe('Codex thread reader', () => {
     );
 
     expect(visible.map((thread) => thread.threadId)).toEqual([
+      'pinned-old',
       'live-1',
       'idle-0',
       'idle-1',
