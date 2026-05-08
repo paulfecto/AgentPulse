@@ -142,9 +142,17 @@ export class CodexThreadReader {
         maxBuffer: 16 * 1024 * 1024
       });
       const rows = JSON.parse(stdout || '[]') as SqliteThreadRow[];
-      return rows;
+      return applySessionThreadNames(rows, await this.readSessionThreadNames());
     } catch {
       return this.readSessionIndexFallback();
+    }
+  }
+
+  private async readSessionThreadNames(): Promise<Map<string, string>> {
+    try {
+      return parseSessionThreadNames(await readFile(path.join(this.codexHome, 'session_index.jsonl'), 'utf8'));
+    } catch {
+      return new Map();
     }
   }
 
@@ -262,6 +270,48 @@ export class CodexThreadReader {
       )
     };
   }
+}
+
+export function parseSessionThreadNames(content: string): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        id?: unknown;
+        thread_name?: unknown;
+      };
+      if (typeof parsed.id !== 'string' || typeof parsed.thread_name !== 'string') {
+        continue;
+      }
+
+      const title = parsed.thread_name.trim();
+      if (title) {
+        names.set(parsed.id, title);
+      }
+    } catch {
+      // Ignore malformed index lines; the SQLite row title remains the fallback.
+    }
+  }
+  return names;
+}
+
+export function applySessionThreadNames(
+  rows: SqliteThreadRow[],
+  names: Map<string, string>
+): SqliteThreadRow[] {
+  if (names.size === 0) {
+    return rows;
+  }
+
+  return rows.map((row) => {
+    const title = names.get(row.id);
+    return title ? { ...row, title } : row;
+  });
 }
 
 export function isLiveStatusFresh(updatedAtMs: number, now: Date, maxAgeMs: number): boolean {

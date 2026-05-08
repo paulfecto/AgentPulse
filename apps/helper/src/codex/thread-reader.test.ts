@@ -4,12 +4,14 @@ import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   CodexThreadReader,
+  applySessionThreadNames,
   isCodexUserFacingThreadRow,
   isUserFacingThreadSource,
   isLiveStatusFresh,
   limitCodexSidebarHistory,
   mapSqliteThreadRow,
   orderedCodexSidebarProjectRoots,
+  parseSessionThreadNames,
   parseCodexSidebarState,
   projectIdForPath,
   readUsageFromRollout,
@@ -61,6 +63,53 @@ describe('Codex thread reader', () => {
       model: 'gpt-5.5',
       reasoningEffort: 'high'
     });
+  });
+
+  it('uses Codex session index thread names as display-title overrides', () => {
+    const names = parseSessionThreadNames(
+      [
+        JSON.stringify({
+          id: 'thread-vox',
+          thread_name: 'Old vox title'
+        }),
+        'not-json',
+        JSON.stringify({
+          id: 'thread-vox',
+          thread_name: 'vox'
+        }),
+        JSON.stringify({
+          id: 'thread-blank',
+          thread_name: '   '
+        })
+      ].join('\n')
+    );
+
+    const rows = applySessionThreadNames(
+      [
+        {
+          id: 'thread-vox',
+          title: 'First verbose user sentence that Codex stored in SQLite',
+          cwd: '/Users/me/projects/vox',
+          updated_at_ms: 1777133990620,
+          archived: 0,
+          rollout_path: ''
+        },
+        {
+          id: 'thread-blank',
+          title: 'Keep sqlite fallback',
+          cwd: '/Users/me/projects/other',
+          updated_at_ms: 1777133991620,
+          archived: 0,
+          rollout_path: ''
+        }
+      ],
+      names
+    );
+
+    expect(rows.map((row) => row.title)).toEqual([
+      'vox',
+      'Keep sqlite fallback'
+    ]);
   });
 
   it('detects waiting approval and error signals from rollout text without exposing raw content', () => {

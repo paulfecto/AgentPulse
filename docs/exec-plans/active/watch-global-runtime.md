@@ -290,6 +290,35 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
     `lastSeenAt = 2026-05-08T00:01:19.951Z` and retained sandbox push token
     registration for `com.paulfecto.AgentPulse.watchkitapp`.
 
+- Watch title convergence, 2026-05-08:
+  - original failing signal: Codex Desktop showed edited sidebar labels such as
+    `vox`, `secretary`, `agentOS`, and `management tool`, while Watch summary
+    titles were verbose first-message strings from SQLite `threads.title`.
+  - root cause: Codex stores the edited/sidebar display name in
+    `~/.codex/session_index.jsonl` as `thread_name`; Agent Pulse only used the
+    SQLite row title when the SQLite query succeeded.
+  - fix: Codex thread reader now parses `session_index.jsonl` and applies
+    non-empty `thread_name` values as display-title overrides by thread id,
+    with malformed lines ignored and SQLite titles retained as fallback.
+  - targeted Docker proof passed:
+    `pnpm exec vitest run apps/helper/src/codex/thread-reader.test.ts -t
+    "session index thread names"` in a disposable Linux install.
+  - full Docker gates passed in a disposable Linux repo copy:
+    `pnpm test` (35 files, 469 tests), `pnpm typecheck`, and `pnpm build`.
+  - public runtime proof after host helper rebuild/restart:
+    `https://beta.dope-ai.kr/agent-pulse/health/get` reported
+    `codexAppServer = "connected"`, `remoteAccess.mode = "edge"`, and
+    `remoteAccess.publicUrl = "https://beta.dope-ai.kr/agent-pulse"`.
+  - public Watch summary proof: authenticated
+    `https://beta.dope-ai.kr/agent-pulse/watch/summary` returned
+    `remoteUrl = "https://beta.dope-ai.kr/agent-pulse"` and first pinned
+    titles `vox`, `secretary`, `agentOS`, `management tool`, `nexus`,
+    `ChemToS`, `finance-test`, and `agent pulse`.
+  - Watch device proof: installed app was launched on physical Watch
+    `E8FAD98B-82EA-5852-A29A-32F306E17758`; keychain record
+    `device:68ab43e5-b1d5-4ac8-8af6-b8fe9747007c` refreshed
+    `lastSeenAt = 2026-05-08T00:12:08.426Z`.
+
 - macmini3 live route repair, 2026-05-08:
   - reached macmini3 through the existing `rpi5-jumphost` SSH hop and confirmed
     the live shared edge still returned Project Manager HTML for
