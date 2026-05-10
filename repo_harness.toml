@@ -1,7 +1,7 @@
-harness_version = "4.12.2"
+harness_version = "4.13.2"
 global_harness_root = "../agentOS"
-global_harness_ref = "52c63f1d47abc8c8f24605b1f01a05fd16a45019"
-global_harness_manifest_sha256 = "f7a5e79dc48fff224edba7291bcacfe5d6963b17a49b3746b12fedba5f9ac73e"
+global_harness_ref = "cdd023499822bdc557273fd71c5af744442fa31f"
+global_harness_manifest_sha256 = "2f9941a3ff652701a354d25ae9f415be982227181f5e5f163bace0b6cb7c584e"
 global_harness_repo = "https://github.com/Dope-AI-KR/agentOS"
 repo_type = "fullstack-web"
 production_sensitive = true
@@ -10,8 +10,8 @@ has_realtime = true
 has_deploy = true
 
 [install]
-profile = "frontier"
-enabled_features = ["core", "consultation", "browser-containerized", "frontier", "secondary-lanes", "termination-supervisor", "creative-workflow", "diagram-design", "engineering-discipline", "ui-reference"]
+profile = "full"
+enabled_features = ["core", "consultation", "browser-containerized", "frontier", "secondary-lanes", "eval-mode", "proof-orchestration", "creative-workflow", "developer-progress-board", "diagram-design", "engineering-discipline", "ui-reference", "termination-supervisor"]
 
 [lane]
 mode = "orchestrated"
@@ -239,7 +239,7 @@ vendor_mode = "external-reference"
 enabled = true
 domain_context_path = "CONTEXT.md"
 adr_dir = "docs/adr"
-clarification_mode = "bounded-interactive"
+clarification_mode = "grill-me"
 debugging_mode = "feedback-loop-first"
 tdd_slice_mode = "vertical"
 doc_update_policy = "exec-plan-bounded"
@@ -260,3 +260,31 @@ vendor_mode = "external-reference"
 reference_docs = ["https://www.lazyweb.com/index.md", "https://www.lazyweb.com/developers.md", "https://www.lazyweb.com/use-lazyweb.md", "https://www.lazyweb.com/.well-known/mcp/server-card.json"]
 allowed_tools = ["lazyweb_health", "lazyweb_search", "lazyweb_find_similar", "lazyweb_compare_image", "lazyweb_list_categories", "lazyweb_list_collections"]
 recommended_for = ["landing-page", "pricing-page", "onboarding-flow", "checkout-flow", "dashboard", "settings-page", "mobile-app-ui", "public-facing-ui-wave"]
+
+[developer_progress_board]
+enabled = true
+visibility = "internal-only"
+locales = ["en", "ko"]
+artifact = "docs/exec-plans/active/developer-progress.json"
+task_items_artifact = "docs/exec-plans/active/task-board-items.json"
+
+[proof_orchestration]
+enabled = true
+modes = ["preflight"]
+artifact_root = "docs/exec-plans/active/proof-orchestration"
+worker_classes_path = "docs/exec-plans/active/proof-orchestration/worker-classes.json"
+scoreboard_path = "docs/exec-plans/active/proof-orchestration/scoreboard.json"
+parity_seal_policy = "optional"
+retry_policy = "classify-harness-product-external"
+certifier_authority = "advisory-only"
+
+[eval_mode]
+enabled = true
+strategy_matrix = "../agentOS/config/eval_strategy_matrix.json"
+scenarios_dir = "docs/agentos-evals/scenarios"
+kernels_dir = "docs/agentos-evals/kernels"
+runs_dir = "docs/agentos-evals/runs"
+executions_dir = "docs/agentos-evals/executions"
+judgments_dir = "docs/agentos-evals/judgments"
+scoreboard_json = "docs/agentos-evals/scoreboard.json"
+default_judge_lane = "codex"

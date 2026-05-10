@@ -21,10 +21,15 @@ Apply it before code changes when the task needs a real execution plan with:
 ## Workflow
 
 1. Read the repo adapter in order before planning.
-2. For broad, risky, or ambiguous work, run a bounded clarification pass:
-   use `harness-clarifier` when that optional skill is available, otherwise
-   inspect discoverable code first, then ask only the question that changes the
-   plan or write set.
+2. For broad, risky, or ambiguous work, run the repo's configured
+   engineering-discipline clarification mode:
+   - if `clarification_mode = "grill-me"`, use `harness-grill-me` and do not
+     write the execution plan until the interview has resolved the decision
+     tree or produced an explicit blocker
+   - if `clarification_mode = "bounded-interactive"`, use `harness-clarifier`
+     for the smaller bounded pass
+   - otherwise inspect discoverable code first, then ask only the question that
+     changes the plan or write set
 3. Define the target behavior and the non-goals.
 4. Bound the write set to the smallest owning files or directories.
 5. Name the owning layer and any contract surfaces that will change.

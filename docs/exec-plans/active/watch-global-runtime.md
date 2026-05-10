@@ -99,6 +99,11 @@ decomposing unrelated tablet source as part of the Watch remote runtime work.
   classification: `handwritten-source`
   disposition: `preserve-only`
   reason-code: `deferred-decomposition`
+- file: `apps/helper/src/server/cloudflare-tunnel.ts`
+  classification: `handwritten-source`
+  disposition: `deferred-split`
+  reason-code: `deferred-decomposition`
+  split-target: `apps/helper/src/server/cloudflare-tunnel-supervisor.ts`
 
 ## Interface or contract changes
 

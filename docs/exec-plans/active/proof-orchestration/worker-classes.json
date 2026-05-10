@@ -1,0 +1,35 @@
+{
+  "classes": [
+    {
+      "default_readonly": true,
+      "description": "UI-heavy disposable browser proof worker that prioritizes fidelity over breadth",
+      "id": "browser-heavy",
+      "max_workers": 2,
+      "requires_containerized_browser": true,
+      "requires_namespaced_fixtures": true,
+      "resource_profile": "browser-heavy",
+      "warm_pool_allowed": false
+    },
+    {
+      "default_readonly": true,
+      "description": "Containerized browser proof worker for lighter interactive checks and warm-pool reuse",
+      "id": "browser-light",
+      "max_workers": 4,
+      "requires_containerized_browser": true,
+      "requires_namespaced_fixtures": true,
+      "resource_profile": "browser-light",
+      "warm_pool_allowed": true
+    },
+    {
+      "default_readonly": true,
+      "description": "Readonly API or MCP proof worker with no browser dependency",
+      "id": "api-only",
+      "max_workers": 8,
+      "requires_containerized_browser": false,
+      "requires_namespaced_fixtures": true,
+      "resource_profile": "api-only",
+      "warm_pool_allowed": false
+    }
+  ],
+  "schema_version": "1.0.0"
+}

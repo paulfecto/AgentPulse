@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-05-10T10:34:56Z",
+  "visibility": "internal-only",
+  "locales": [
+    "en",
+    "ko"
+  ],
+  "task_id": "agentos-convergence",
+  "plan_ref": "docs/exec-plans/active/agentos-convergence.md",
+  "owner_lane": "codex",
+  "status": "in-progress",
+  "next_proof_gate": "",
+  "consultation_state": "pending",
+  "latest_routing_decision_ref": "",
+  "open_blocker_ref": "",
+  "blocker_summary_en": "No blocker recorded.",
+  "blocker_summary_ko": "기록된 블로커가 없습니다.",
+  "task_items_ref": "docs/exec-plans/active/task-board-items.json",
+  "tasks": [
+    {
+      "id": "agentos-convergence",
+      "title_en": "agentos-convergence",
+      "title_ko": "agentos-convergence",
+      "status": "in-progress",
+      "lane": "codex",
+      "summary_en": "docs/exec-plans/active/agentos-convergence.md",
+      "summary_ko": "docs/exec-plans/active/agentos-convergence.md",
+      "href": "docs/exec-plans/active/agentos-convergence.md"
+    }
+  ]
+}

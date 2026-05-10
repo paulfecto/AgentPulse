@@ -168,5 +168,15 @@
     "line_count": 901,
     "plan": "docs/exec-plans/active/agentos-downstream-adoption.md",
     "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "9ffc57822030a0c27f79e8095e95461952d1336398d0a278ddc2e1ff3d849812",
+    "content_simhash": "3f97b602401ef07d",
+    "disposition": "deferred-split",
+    "file": "apps/helper/src/server/cloudflare-tunnel.ts",
+    "line_count": 705,
+    "plan": "docs/exec-plans/active/watch-global-runtime.md",
+    "reason_code": "deferred-decomposition"
   }
 ]

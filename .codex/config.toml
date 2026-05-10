@@ -41,7 +41,7 @@ Success criteria:
 - Use `.agents/skills/harness-executor` as the default intake path for non-trivial implementation, debugging, refactoring, review, or research work.
 - Keep Codex as the default lane unless `repo_harness.toml [lane]` routes a specific role elsewhere.
 - When `[diagram_design]` is enabled, treat internal explanatory diagrams as `diagram-generation` work routed to Claude; keep source-of-truth diagrams in Mermaid, D2, PlantUML, or generated graph formats.
-- When `[engineering_discipline]` is enabled, use the optional shared skills for bounded clarification, feedback-loop-first diagnosis, shared domain language, and vertical TDD slices.
+- When `[engineering_discipline]` is enabled, use `harness-grill-me` for `clarification_mode = "grill-me"`, `harness-clarifier` for bounded fallback mode, feedback-loop-first diagnosis, shared domain language, and vertical TDD slices.
 - When `[ui_reference]` is enabled, use `harness-ui-researcher` before UI creation, critique, redesign, frontend visual polish, onboarding/pricing/dashboard/settings/mobile UI work; Lazyweb availability is warning-only.
 - For complex, risky, ambiguous, or non-trivial work, keep a real active execution plan current.
 
@@ -57,6 +57,11 @@ Evidence required:
 - Before claiming complete, run validation, review the work, and record validation evidence, TDD evidence when behavior changes, and review evidence in the active execution plan.
 - Before final handoff, run `scripts/codex/clean_repo_artifacts.sh` or otherwise remove disposable artifacts from `.playwright-cli/`, `output/bkit/`, and other harness-managed transient paths.
 [/agentOS managed router]
+
+[agentOS preserved router notes]
+Repo-local routing notes preserved from a previous managed router block:
+- When `[engineering_discipline]` is enabled, use the optional shared skills for bounded clarification, feedback-loop-first diagnosis, shared domain language, and vertical TDD slices.
+[/agentOS preserved router notes]
 '''
 
 [history]
@@ -123,4 +128,8 @@ enabled = true
 
 [[skills.config]]
 path = ".agents/skills/harness-ui-researcher"
+enabled = true
+
+[[skills.config]]
+path = ".agents/skills/harness-grill-me"
 enabled = true

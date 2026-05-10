@@ -2,17 +2,17 @@
   "accepted": true,
   "answers": {
     "claude_writing_workflow": true,
-    "continuous_local_iteration": false,
-    "developer_progress_panel": false,
+    "continuous_local_iteration": true,
+    "developer_progress_panel": true,
     "diagram_design_workflow": true,
     "engineering_discipline_workflow": true,
     "external_resume": false,
-    "gemini_media_workflow": false,
+    "gemini_media_workflow": true,
     "primary_lane": "codex",
     "repo_type": "fullstack-web",
     "ui_reference_workflow": true
   },
-  "generated_at": "2026-05-05T13:53:04Z",
+  "generated_at": "2026-05-10T09:17:54Z",
   "install": {
     "enabled_features": [
       "core",
@@ -20,21 +20,27 @@
       "browser-containerized",
       "frontier",
       "secondary-lanes",
-      "termination-supervisor",
+      "eval-mode",
+      "proof-orchestration",
       "creative-workflow",
+      "developer-progress-board",
       "diagram-design",
       "engineering-discipline",
-      "ui-reference"
+      "ui-reference",
+      "termination-supervisor"
     ],
-    "profile": "frontier"
+    "profile": "full"
   },
   "recommendations": [
     "Keep AgentOS setup plan-first: answer project-specific questions before mutation.",
     "Use current adapter contract surfaces instead of old compatibility inference.",
     "Route writing tasks to Claude through the creative-workflow feature.",
+    "Route image/video generation to Gemini through the creative-workflow feature.",
+    "Install the collapsible internal developer progress panel preset.",
     "Use diagram-design as the preferred style for internal explanatory diagrams, with Mermaid/D2/PlantUML/generated graphs reserved for source-of-truth diagrams.",
-    "Use engineering-discipline for bounded clarification, feedback-loop-first debugging, CONTEXT.md domain language, ADRs, and vertical TDD slices.",
-    "Use ui-reference for Lazyweb-backed UI/UX reference grounding before UI creation, critique, redesign, or polish."
+    "Use engineering-discipline for GrillMe planning, feedback-loop-first debugging, CONTEXT.md domain language, ADRs, and vertical TDD slices.",
+    "Use ui-reference for Lazyweb-backed UI/UX reference grounding before UI creation, critique, redesign, or polish.",
+    "Use termination-supervisor for continuous local iteration."
   ],
   "repo_path": "/Volumes/paulfecto/Development_team/AgentPulse",
   "schema_version": "1.0",
