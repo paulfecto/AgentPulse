@@ -169,9 +169,19 @@ payload = {
 plist_path.write_bytes(plistlib.dumps(payload, sort_keys=False))
 PY
 
-  if launchctl print "gui/$uid/$launch_label" >/dev/null 2>&1; then
-    launchctl bootout "gui/$uid/$launch_label" >/dev/null 2>&1 || true
-  fi
+  launchctl bootout "gui/$uid/$launch_label" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$uid" "$plist_path" >/dev/null 2>&1 || true
+  for attempt in $(seq 1 20); do
+    if ! launchctl print "gui/$uid/$launch_label" >/dev/null 2>&1; then
+      break
+    fi
+    if (( attempt == 20 )); then
+      echo "LaunchAgent $launch_label is still registered after bootout." >&2
+      launchctl print "gui/$uid/$launch_label" >&2 || true
+      exit 1
+    fi
+    sleep 0.5
+  done
   launchctl bootstrap "gui/$uid" "$plist_path"
   launchctl kickstart -k "gui/$uid/$launch_label" >/dev/null 2>&1 || true
 }

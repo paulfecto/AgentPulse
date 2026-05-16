@@ -34,6 +34,8 @@ describe('macmini3 Agent Pulse beta deploy automation', () => {
     expect(deploy).toContain('AGENT_PULSE_DISABLE_CODEX_DESKTOP=1');
     expect(deploy).toContain('AGENT_PULSE_SKIP_MANAGED_TUNNEL=1');
     expect(deploy).toContain('launchctl bootout "gui/$uid/$launch_label"');
+    expect(deploy).toContain('launchctl bootout "gui/$uid" "$plist_path"');
+    expect(deploy).toContain('LaunchAgent $launch_label is still registered after bootout.');
     expect(deploy).toContain('Port $helper_port is already in use by a non-Agent Pulse beta LaunchAgent process.');
     expect(deploy).toContain('npm exec --yes pnpm@10.28.2 --');
     expect(deploy).toContain('run_pnpm install --frozen-lockfile');
