@@ -37,9 +37,13 @@ describe('macmini3 Agent Pulse beta deploy automation', () => {
     expect(deploy).toContain('Port $helper_port is already in use by a non-Agent Pulse beta LaunchAgent process.');
     expect(deploy).toContain('npm exec --yes pnpm@10.28.2 --');
     expect(deploy).toContain('run_pnpm install --frozen-lockfile');
+    expect(deploy).toContain("pgrep -fl 'codex app-server'");
+    expect(deploy).toContain("grep -v '/tmp/fake-bin/codex'");
     expect(helper).toContain('AGENT_PULSE_WRITE_SETTINGS_ONLY');
     expect(helper).toContain('mode: \'edge\'');
     expect(helper).toContain('mobileSendEnabled: true');
+    expect(helper).toContain('prepend_codex_cli_path');
+    expect(helper).toContain("find \"$nvm_root/versions/node\" -path '*/bin/codex'");
   });
 
   it('reconciles only a marked /agent-pulse shared-edge block and supports host or container upstreams', async () => {

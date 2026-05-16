@@ -217,7 +217,7 @@ log "Installing Codex-safe LaunchAgent $launch_label"
 ensure_launch_agent
 wait_for_url_contains "http://127.0.0.1:${helper_port}/health/get" '"codexAppServer":"connected"' 60
 
-if ! pgrep -fl '/Applications/Codex.app/Contents/Resources/codex app-server' >/dev/null 2>&1; then
+if ! pgrep -fl 'codex app-server' | grep -v '/tmp/fake-bin/codex' >/dev/null 2>&1; then
   echo "Real Codex app-server process was not found after helper start." >&2
   exit 1
 fi

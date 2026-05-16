@@ -17,6 +17,30 @@ log() {
   echo "[agent-pulse-beta-helper] $*"
 }
 
+prepend_codex_cli_path() {
+  if command -v codex >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local nvm_root="${NVM_DIR:-$HOME/.nvm}"
+  if [[ ! -d "$nvm_root/versions/node" ]]; then
+    return 0
+  fi
+
+  local codex_bin codex_dir
+  codex_bin="$(
+    find "$nvm_root/versions/node" -path '*/bin/codex' -type f -print 2>/dev/null |
+      sort -V |
+      tail -n 1
+  )"
+  if [[ -z "$codex_bin" ]]; then
+    return 0
+  fi
+
+  codex_dir="$(dirname "$codex_bin")"
+  export PATH="$codex_dir:$PATH"
+}
+
 case "$public_url" in
   https://*) ;;
   *)
@@ -122,6 +146,8 @@ if [[ ! -f "$helper_script" ]]; then
   echo "Missing helper build at $helper_script. Run pnpm build or unset AGENT_PULSE_SKIP_BUILD." >&2
   exit 1
 fi
+
+prepend_codex_cli_path
 
 if lsof -tiTCP:"$helper_port" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "Port $helper_port is already in use. Stop only the Agent Pulse helper using that port, then rerun this script." >&2
