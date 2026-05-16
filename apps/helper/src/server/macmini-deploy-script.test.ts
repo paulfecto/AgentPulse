@@ -43,7 +43,7 @@ describe('macmini3 Agent Pulse beta deploy automation', () => {
     expect(helper).toContain('mode: \'edge\'');
     expect(helper).toContain('mobileSendEnabled: true');
     expect(helper).toContain('prepend_codex_cli_path');
-    expect(helper).toContain("find \"$nvm_root/versions/node\" -path '*/bin/codex'");
+    expect(helper).toContain("find \"$nvm_root/versions/node\" -path '*/bin/codex' \\( -type f -o -type l \\)");
   });
 
   it('reconciles only a marked /agent-pulse shared-edge block and supports host or container upstreams', async () => {

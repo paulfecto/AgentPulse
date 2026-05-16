@@ -29,8 +29,8 @@ prepend_codex_cli_path() {
 
   local codex_bin codex_dir
   codex_bin="$(
-    find "$nvm_root/versions/node" -path '*/bin/codex' -type f -print 2>/dev/null |
-      sort -V |
+    find "$nvm_root/versions/node" -path '*/bin/codex' \( -type f -o -type l \) -print 2>/dev/null |
+      sort |
       tail -n 1
   )"
   if [[ -z "$codex_bin" ]]; then
