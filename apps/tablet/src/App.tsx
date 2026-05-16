@@ -10,6 +10,7 @@ import {
   type CatalogSkill,
   type ChatAttachment,
   type CollaborationModeKind,
+  type SelectableCodexPermissionModeId,
   type AgentProvider,
   type HelperHealth,
   type ApprovalInboxItem,
@@ -21,6 +22,7 @@ import {
   type Project,
   type RemoteAccessSettings,
   type Thread,
+  type ThreadGoal,
   type ThreadFileChangeSummary,
   type ThreadListGroup,
   type TouchCommand,
@@ -42,12 +44,15 @@ import {
   Monitor,
   Moon,
   Palette,
+  Pencil,
   RefreshCw,
   ShieldCheck,
   Sun,
   Tablet,
   Trash2,
-  Watch
+  Upload,
+  Watch,
+  XCircle
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -61,6 +66,7 @@ import {
   clearSession,
   checkWatchNotifications,
   checkRemoteAccess,
+  clearThreadGoal,
   configureCloudflareRemoteAccess,
   createTranscriptCommentDraft,
   createHandoffSummaryDraft,
@@ -74,6 +80,7 @@ import {
   fetchHealth,
   fetchHandoffs,
   fetchTouchCommands,
+  fetchThreadGoal,
   fetchProjectFiles,
   fetchProjects,
   fetchOlderThreadMessages,
@@ -99,8 +106,10 @@ import {
   sendThreadMessage,
   sendHandoff,
   startThread,
+  updateThreadGoal,
   stopThreadWork,
   transcribeVoiceAudio,
+  updateAppearanceSettings,
   updateRemoteAccess,
   updateEnabledProviders,
   updateWatchNotifications,
@@ -112,7 +121,15 @@ import { AppMark } from './AppMark';
 import { Dashboard, type NewThreadTarget } from './Dashboard';
 import { ProviderMark } from './ProviderMark';
 import { providerLabel, providerTone } from './providers';
-import { useThemePreference, type ThemePreference } from './theme';
+import {
+  defaultAppearanceSettings,
+  normalizeAppearanceSettings,
+  parseCodexThemeImport,
+  useThemePreference,
+  type AppearanceSettings,
+  type ImportedCodexTheme,
+  type ThemePreference
+} from './theme';
 
 type AppScreen =
   | 'chooser'
@@ -139,6 +156,7 @@ const SETTLED_TRANSCRIPT_REFRESH_DELAYS_MS = [750, 1_500];
 const MIRROR_STREAMING_TURN_PREFIX = 'mirror-streaming:';
 const THREAD_LIST_PAGE_SIZE = 6;
 const THREAD_LIST_CHAT_GROUP_KEY = 'agent-pulse-chats';
+const GOAL_START_MESSAGE = 'Please start working on the goal.';
 
 const ADMIN_FLEX_SCREENS = new Set<AppScreen>(['settings', 'admin-login', 'chooser']);
 const BACKGROUND_STABLE_SCREENS = new Set<AppScreen>(['settings', 'admin-login']);
@@ -161,6 +179,7 @@ type AdminPairingPin = {
   pin: string;
   expiresAt?: string;
   deviceId?: string;
+  deviceName?: string;
 };
 
 function sameSession(
@@ -241,6 +260,20 @@ function transcriptAfterStop(transcript: ThreadTranscript): ThreadTranscript {
             reason: 'ready',
             label: 'Ready'
           }
+  });
+}
+
+function transcriptAfterApprovalCleared(transcript: ThreadTranscript): ThreadTranscript {
+  if (transcript.sendState.reason !== 'waiting_on_approval') {
+    return transcript;
+  }
+  return ThreadTranscriptSchema.parse({
+    ...transcript,
+    sendState: {
+      canSend: false,
+      reason: 'thread_changed',
+      label: `${providerLabel(transcript.provider)} is working`
+    }
   });
 }
 
@@ -447,7 +480,7 @@ function summarizePendingRequest(raw: unknown): PendingRequestSummary | null {
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
       // Pass the raw params through so the renderer can show answer options
       // (options + freeform fallback) — without this the tablet just shows
-      // "Open Codex on your Mac to answer." with no way to respond.
+      // "Open Codex on the helper computer to answer." with no way to respond.
       params: req.params as Record<string, unknown> | undefined
     };
   }
@@ -1212,14 +1245,38 @@ function upsertTranscriptCache(
     !transcript.usage && previous?.usage
       ? { ...transcript, usage: previous.usage }
       : transcript;
+  const withStableGoal =
+    stableTranscript.goal === undefined && previous?.goal !== undefined
+      ? { ...stableTranscript, goal: previous.goal }
+      : stableTranscript;
 
-  if (previous && transcriptLooksOlder(stableTranscript, previous)) {
+  if (previous && transcriptLooksOlder(withStableGoal, previous)) {
     return current;
   }
 
   return {
     ...current,
-    [transcript.threadId]: cacheableTranscript(stableTranscript)
+    [transcript.threadId]: cacheableTranscript(withStableGoal)
+  };
+}
+
+function upsertTranscriptGoal(
+  current: Record<string, ThreadTranscript>,
+  threadId: string,
+  goal: ThreadGoal | null
+): Record<string, ThreadTranscript> {
+  const previous = current[threadId];
+  if (!previous) {
+    return current;
+  }
+  return {
+    ...current,
+    [threadId]: cacheableTranscript(
+      ThreadTranscriptSchema.parse({
+        ...previous,
+        goal
+      })
+    )
   };
 }
 
@@ -1290,12 +1347,22 @@ function transcriptHasFreshPostSendMessage(
   transcript: ThreadTranscript,
   guard: ActiveSendGuard
 ): boolean {
+  const activeTurnId = transcript.activeTurnId;
   return transcript.messages.some((message) => {
     if (guard.baselineMessageIds.has(message.id)) {
       return false;
     }
+    if (message.role === 'user') {
+      return false;
+    }
+    if (message.role === 'assistant' && message.kind === 'message') {
+      return false;
+    }
+    if (activeTurnId && message.turnId) {
+      return message.turnId === activeTurnId;
+    }
     const createdAt = Date.parse(message.createdAt);
-    return !Number.isFinite(createdAt) || createdAt >= guard.startedAt - 10_000;
+    return Number.isFinite(createdAt) && createdAt >= guard.startedAt;
   });
 }
 
@@ -1405,6 +1472,8 @@ export function App() {
   const [transcripts, setTranscripts] = useState<Record<string, ThreadTranscript>>(() =>
     readCachedTranscripts(loadSession())
   );
+  const threadsRef = useRef(threads);
+  const transcriptsRef = useRef(transcripts);
   const activeSendGuardsRef = useRef<Map<string, ActiveSendGuard>>(new Map());
   const [threadModels, setThreadModels] = useState<Record<string, string>>({});
   const [threadReasoningEfforts, setThreadReasoningEfforts] = useState<Record<string, string>>({});
@@ -1484,6 +1553,15 @@ export function App() {
   // local optimistic state so taps register instantly even before the broadcast
   // round-trips.
   const [seenThreadActivity, setSeenThreadActivity] = useState<Record<string, number>>({});
+  const [seenThreadActivityLoaded, setSeenThreadActivityLoaded] = useState(false);
+
+  useEffect(() => {
+    threadsRef.current = threads;
+  }, [threads]);
+
+  useEffect(() => {
+    transcriptsRef.current = transcripts;
+  }, [transcripts]);
 
   const markThreadWorking = useCallback((threadId: string) => {
     setStreamingThreadIds((current) => {
@@ -1583,7 +1661,13 @@ export function App() {
       void (async () => {
         try {
           const transcript = await fetchThreadTranscript(currentSession, threadId);
-          setTranscripts((current) => upsertTranscriptCache(current, transcript));
+          const guard = activeSendGuardsRef.current.get(threadId);
+          if (shouldAcceptTranscriptForActiveSend(transcript, guard)) {
+            setTranscripts((current) => upsertTranscriptCache(current, transcript));
+            if (guard && transcriptConfirmsActiveSend(transcript, guard)) {
+              activeSendGuardsRef.current.delete(threadId);
+            }
+          }
           applyTranscriptActivityState(transcript);
           applyTranscriptModel(threadId, transcript.model, transcript.reasoningEffort);
         } catch {
@@ -1615,8 +1699,10 @@ export function App() {
   );
 
   const requestSettledTranscriptRefresh = useCallback(
-    (threadId: string) => {
-      requestTranscriptRefresh(threadId);
+    (threadId: string, options: { immediate?: boolean } = {}) => {
+      if (options.immediate !== false) {
+        requestTranscriptRefresh(threadId);
+      }
       const timersByThread = settledTranscriptRefreshTimersRef.current;
       for (const timer of timersByThread.get(threadId) ?? []) {
         window.clearTimeout(timer);
@@ -1638,6 +1724,51 @@ export function App() {
       timersByThread.set(threadId, timers);
     },
     [requestTranscriptRefresh]
+  );
+
+  const clearApprovalWaitingState = useCallback(
+    (threadId: string) => {
+      const threadIsWaiting = threadsRef.current.some(
+        (thread) => thread.threadId === threadId && thread.status === 'waiting_approval'
+      );
+      const transcriptIsWaiting =
+        transcriptsRef.current[threadId]?.sendState.reason === 'waiting_on_approval';
+      if (!threadIsWaiting && !transcriptIsWaiting) {
+        return;
+      }
+      setThreads((current) =>
+        current.map((thread) =>
+          thread.threadId === threadId && thread.status === 'waiting_approval'
+            ? { ...thread, status: 'running' }
+            : thread
+        )
+      );
+      setHandoffs((current) =>
+        current.map((handoff) =>
+          handoff.targetThreadId === threadId && handoff.status === 'waiting_approval'
+            ? {
+                ...handoff,
+                status: handoffStatusFromThread('running'),
+                blockers: [],
+                updatedAt: new Date().toISOString()
+              }
+            : handoff
+        )
+      );
+      setTranscripts((current) => {
+        const transcript = current[threadId];
+        if (!transcript) {
+          return current;
+        }
+        const nextTranscript = transcriptAfterApprovalCleared(transcript);
+        if (nextTranscript === transcript) {
+          return current;
+        }
+        return upsertTranscriptCache(current, nextTranscript);
+      });
+      requestSettledTranscriptRefresh(threadId, { immediate: false });
+    },
+    [requestSettledTranscriptRefresh]
   );
 
   useEffect(
@@ -1754,12 +1885,16 @@ export function App() {
       setTouchCommands([]);
       setTranscripts({});
       setLiveAssistantTextByThread({});
+      setSeenThreadActivity({});
+      setSeenThreadActivityLoaded(false);
       setThreadsLoaded(false);
       setActiveThreadId(undefined);
       return;
     }
 
     setThreads(readCachedThreads(session));
+    setSeenThreadActivity({});
+    setSeenThreadActivityLoaded(false);
     setThreadListGroups([]);
     setThreadGroupLimits((current) => (Object.keys(current).length === 0 ? current : {}));
     setTranscripts(readCachedTranscripts(session));
@@ -1813,6 +1948,8 @@ export function App() {
         setTouchCommands([]);
         setTranscripts({});
         setLiveAssistantTextByThread({});
+        setSeenThreadActivity({});
+        setSeenThreadActivityLoaded(false);
         setThreadsLoaded(false);
         setActiveThreadId(undefined);
         setScreen(screenAfterClearingSession);
@@ -1896,6 +2033,10 @@ export function App() {
         } catch {
           // Soft-fail — Dashboard falls back to its localStorage copy when the
           // override is empty.
+        } finally {
+          if (sameSession(loadSession(), requestSession)) {
+            setSeenThreadActivityLoaded(true);
+          }
         }
       })();
       fetchCatalogPlugins(requestSession)
@@ -1993,6 +2134,8 @@ export function App() {
         setTouchCommands([]);
         setTranscripts({});
         setLiveAssistantTextByThread({});
+        setSeenThreadActivity({});
+        setSeenThreadActivityLoaded(false);
         setThreadsLoaded(false);
         setActiveThreadId(undefined);
         setScreen(screenAfterClearingSession);
@@ -2130,6 +2273,12 @@ export function App() {
           );
         }
 
+        if (liveEvent.type === 'thread/goal/changed') {
+          setTranscripts((current) =>
+            upsertTranscriptGoal(current, liveEvent.payload.threadId, liveEvent.payload.goal)
+          );
+        }
+
         if (liveEvent.type === 'thread/status/changed') {
           const { threadId, status } = liveEvent.payload;
           setThreads((current) =>
@@ -2154,6 +2303,26 @@ export function App() {
                 : handoff
             )
           );
+          if (status !== 'waiting_approval') {
+            setThreadPendingRequests((current) => {
+              const list = current[threadId] ?? [];
+              if (list.length === 0) {
+                return current;
+              }
+              return { ...current, [threadId]: [] };
+            });
+            setTranscripts((current) => {
+              const transcript = current[threadId];
+              if (!transcript) {
+                return current;
+              }
+              const nextTranscript = transcriptAfterApprovalCleared(transcript);
+              if (nextTranscript === transcript) {
+                return current;
+              }
+              return upsertTranscriptCache(current, nextTranscript);
+            });
+          }
           if (status === 'running' || status === 'waiting_approval' || status === 'compacting') {
             markThreadWorking(threadId);
           } else {
@@ -2214,6 +2383,16 @@ export function App() {
             ...current,
             [threadId]: summaries
           }));
+          if (summaries.length > 0) {
+            setThreads((current) =>
+              current.map((thread) =>
+                thread.threadId === threadId ? { ...thread, status: 'waiting_approval' } : thread
+              )
+            );
+            markThreadWorking(threadId);
+          } else {
+            clearApprovalWaitingState(threadId);
+          }
         }
 
         if (liveEvent.type === 'thread/file-changes/changed') {
@@ -2245,6 +2424,7 @@ export function App() {
             }
             return { ...current, [threadId]: seenAt };
           });
+          setSeenThreadActivityLoaded(true);
         }
 
         if (liveEvent.type === 'handoff/changed') {
@@ -2313,6 +2493,7 @@ export function App() {
     sessionRecoverySuspended,
     applyTranscriptActivityState,
     applyTranscriptModel,
+    clearApprovalWaitingState,
     markThreadReady,
     markThreadWorking,
     requestTranscriptRefresh,
@@ -2580,7 +2761,11 @@ export function App() {
     async (
       threadId: string,
       text: string,
-      options?: { collaborationMode?: CollaborationModeKind; attachments?: ChatAttachment[] }
+      options?: {
+        collaborationMode?: CollaborationModeKind;
+        permissionMode?: SelectableCodexPermissionModeId;
+        attachments?: ChatAttachment[];
+      }
     ) => {
       if (!session) {
         return Promise.reject(new Error('Not connected.'));
@@ -2625,6 +2810,60 @@ export function App() {
       return result;
     },
     [session, transcripts, applyTranscriptActivityState, applyTranscriptModel]
+  );
+
+  const mergeThreadGoal = useCallback((threadId: string, goal: ThreadGoal | null) => {
+    setTranscripts((current) => upsertTranscriptGoal(current, threadId, goal));
+  }, []);
+
+  const handleFetchThreadGoal = useCallback(
+    async (threadId: string): Promise<ThreadGoal | null> => {
+      if (!session) {
+        throw new Error('Not connected.');
+      }
+      const goal = await fetchThreadGoal(session, threadId);
+      mergeThreadGoal(threadId, goal);
+      return goal;
+    },
+    [session, mergeThreadGoal]
+  );
+
+  const handleUpdateThreadGoal = useCallback(
+    async (
+      threadId: string,
+      input: { objective?: string; status?: ThreadGoal['status']; tokenBudget?: number | null }
+    ): Promise<ThreadGoal> => {
+      if (!session) {
+        throw new Error('Not connected.');
+      }
+      const goal = await updateThreadGoal(session, threadId, input);
+      mergeThreadGoal(threadId, goal);
+      const shouldSendGoalStartMessage =
+        typeof input.objective === 'string' &&
+        input.objective.trim().length > 0 &&
+        (input.status ?? 'active') === 'active';
+      if (shouldSendGoalStartMessage) {
+        try {
+          await handleSendMessage(threadId, GOAL_START_MESSAGE);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          throw new Error(`Goal was saved, but Codex did not accept the start message: ${detail}`);
+        }
+      }
+      return goal;
+    },
+    [session, mergeThreadGoal, handleSendMessage]
+  );
+
+  const handleClearThreadGoal = useCallback(
+    async (threadId: string): Promise<void> => {
+      if (!session) {
+        throw new Error('Not connected.');
+      }
+      await clearThreadGoal(session, threadId);
+      mergeThreadGoal(threadId, null);
+    },
+    [session, mergeThreadGoal]
   );
 
   const handleTranscribeVoiceAudio = useCallback(
@@ -2903,6 +3142,9 @@ export function App() {
                 }
               : undefined
           }
+          onFetchThreadGoal={handleFetchThreadGoal}
+          onUpdateThreadGoal={handleUpdateThreadGoal}
+          onClearThreadGoal={handleClearThreadGoal}
           onApprovalDecision={
             session
               ? async (threadId, requestId, method, decision) => {
@@ -2917,10 +3159,12 @@ export function App() {
                   setApprovalInboxItems((current) =>
                     current.filter((item) => item.threadId !== threadId || item.requestId !== requestId)
                   );
+                  clearApprovalWaitingState(threadId);
                 }
               : undefined
           }
           seenThreadActivityOverride={seenThreadActivity}
+          reviewStateReady={seenThreadActivityLoaded}
           onMarkThreadSeen={handleMarkThreadSeen}
         />
         {message ? <div className="toast">{message}</div> : null}
@@ -2940,6 +3184,10 @@ export function App() {
     handleOpenAdmin,
     handlePair,
     handleSendMessage,
+    handleFetchThreadGoal,
+    handleUpdateThreadGoal,
+    handleClearThreadGoal,
+    clearApprovalWaitingState,
     handleTranscribeVoiceAudio,
     handleStopWork,
     handleOpenThreadInCodex,
@@ -2968,6 +3216,7 @@ export function App() {
     threadsLoaded,
     transcripts,
     seenThreadActivity,
+    seenThreadActivityLoaded,
     handleMarkThreadSeen
   ]);
 
@@ -2997,7 +3246,7 @@ function ChooserScreen({
             </span>
             <span className="chooser-tile-title">Connect a device</span>
             <span className="chooser-tile-copy">
-              Pair this tablet with the Mac helper using a 6-digit PIN.
+              Pair this tablet with the helper using a 6-digit PIN.
             </span>
           </button>
           <button className="chooser-tile" type="button" onClick={onAdmin}>
@@ -3073,7 +3322,7 @@ function PairingScreen({
         <AppMark size="lg" />
         <p className="eyebrow">Connect a device</p>
         <h1>Pair this display</h1>
-        <p className="simple-copy">Enter the PIN shown in admin mode on your Mac.</p>
+        <p className="simple-copy">Enter the PIN shown in admin mode on the helper.</p>
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -3179,7 +3428,7 @@ function AdminLoginScreen({
         <p className="eyebrow">Admin mode</p>
         <h1>Enter passcode</h1>
         <p className="simple-copy">
-          The passcode is printed in the Mac helper console the first time you launch it.
+          The passcode is printed in the helper console the first time you launch it.
         </p>
         <form
           onSubmit={(event) => {
@@ -3230,7 +3479,7 @@ function OfflineScreen({ onRetry }: { onRetry: () => void }) {
       <div className="surface-panel state-panel">
         <AlertTriangle size={42} />
         <h1>Helper offline</h1>
-        <p className="simple-copy">The Mac helper is not reachable right now.</p>
+        <p className="simple-copy">The helper is not reachable right now.</p>
         <button className="primary-action full-width" type="button" onClick={onRetry}>
           <RefreshCw size={20} />
           Try again
@@ -3272,6 +3521,7 @@ function SettingsScreen({
 }) {
   const [pin, setPin] = useState('');
   const [pinExpiresAt, setPinExpiresAt] = useState<string | undefined>();
+  const [pinDeviceName, setPinDeviceName] = useState<string | undefined>();
   const [lanEnabled, setLanEnabled] = useState(false);
   const [mobileSendEnabled, setMobileSendEnabled] = useState(false);
   const [enabledProviders, setEnabledProviders] = useState<AgentProvider[]>(() => [...AGENT_PROVIDERS]);
@@ -3279,8 +3529,12 @@ function SettingsScreen({
   const [watchNotifications, setWatchNotifications] = useState<WatchNotificationsSettings>(() => defaultWatchNotifications());
   const [devices, setDevices] = useState<AdminDevice[]>([]);
   const [selectedPairDeviceId, setSelectedPairDeviceId] = useState('');
+  const [newDeviceName, setNewDeviceName] = useState('Admin tablet');
   const [devicePins, setDevicePins] = useState<Record<string, AdminPairingPin>>({});
-  const { theme, setTheme } = useThemePreference();
+  const [editingDeviceId, setEditingDeviceId] = useState('');
+  const [editingDeviceName, setEditingDeviceName] = useState('');
+  const [renameError, setRenameError] = useState('');
+  const { theme, appearance, setAppearance, setTheme } = useThemePreference();
   const remoteTone = remoteAccess.status === 'healthy' ? 'green' : remoteAccess.enabled ? 'blue' : 'gray';
   const watchTone = watchNotifications.lastError ? 'red' : watchNotifications.enabled ? 'green' : 'gray';
 
@@ -3296,6 +3550,7 @@ function SettingsScreen({
         setLanEnabled(Boolean(payload.settings?.lanEnabled));
         setMobileSendEnabled(Boolean(payload.settings?.mobileSendEnabled));
         setEnabledProviders(normalizeEnabledProvidersForUi(payload.settings?.enabledProviders));
+        setAppearance(normalizeAppearanceSettingsForUi(payload.settings?.appearance));
         const nextRemote = payload.settings?.remoteAccess ?? defaultRemoteAccess();
         setRemoteAccess(nextRemote);
         setWatchNotifications(payload.settings?.watchNotifications ?? defaultWatchNotifications());
@@ -3307,6 +3562,7 @@ function SettingsScreen({
         const pins = splitPairingPins(payload.pairingPins ?? []);
         setPin(pins.newDevicePin?.pin ?? '');
         setPinExpiresAt(pins.newDevicePin?.expiresAt);
+        setPinDeviceName(pins.newDevicePin?.deviceName);
         setDevicePins(pins.devicePins);
       })
       .catch((error: unknown) => {
@@ -3317,9 +3573,17 @@ function SettingsScreen({
   }, [adminToken, onAdminExpired]);
 
   const createPin = async (deviceId?: string) => {
+    const nextDeviceName = deviceId ? undefined : newDeviceName.trim() || undefined;
+    const requestBody =
+      deviceId || nextDeviceName
+        ? {
+            ...(deviceId ? { deviceId } : {}),
+            ...(nextDeviceName ? { deviceName: nextDeviceName } : {})
+          }
+        : undefined;
     const response = await adminFetch('/settings/pairing-pin', adminToken, {
       method: 'POST',
-      ...(deviceId ? { body: JSON.stringify({ deviceId }) } : {})
+      ...(requestBody ? { body: JSON.stringify(requestBody) } : {})
     });
     if (!response.ok) {
       if (response.status === 401) {
@@ -3338,7 +3602,67 @@ function SettingsScreen({
 
     setPin(payload.pin);
     setPinExpiresAt(payload.expiresAt);
+    setPinDeviceName(payload.deviceName);
     return payload.pin;
+  };
+
+  const startDeviceRename = (device: AdminDevice) => {
+    setRenameError('');
+    setEditingDeviceId(device.deviceId);
+    setEditingDeviceName(device.deviceName);
+  };
+
+  const cancelDeviceRename = () => {
+    setRenameError('');
+    setEditingDeviceId('');
+    setEditingDeviceName('');
+  };
+
+  const submitDeviceRename = async (deviceId: string) => {
+    const nextName = editingDeviceName.trim();
+    if (!nextName) {
+      setRenameError('Enter a device name.');
+      return;
+    }
+
+    const previousDevices = devices;
+    setRenameError('');
+    setEditingDeviceId('');
+    setEditingDeviceName('');
+    setDevices((current) =>
+      current.map((device) =>
+        device.deviceId === deviceId ? { ...device, deviceName: nextName } : device
+      )
+    );
+
+    const response = await adminFetch('/settings/device/rename', adminToken, {
+      method: 'POST',
+      body: JSON.stringify({ deviceId, deviceName: nextName })
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: unknown;
+      device?: AdminDevice;
+    };
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        onAdminExpired();
+        return;
+      }
+      setDevices(previousDevices);
+      setRenameError(
+        typeof payload.error === 'string' ? payload.error : 'Could not rename this device.'
+      );
+      return;
+    }
+
+    if (payload.device) {
+      setDevices((current) =>
+        current.map((device) =>
+          device.deviceId === deviceId ? { ...device, ...payload.device } : device
+        )
+      );
+    }
   };
 
   const toggleLan = async () => {
@@ -3371,6 +3695,67 @@ function SettingsScreen({
       setEnabledProviders(normalizeEnabledProvidersForUi(nextSettings.enabledProviders));
     } catch {
       setEnabledProviders(enabledProviders);
+    }
+  };
+
+  const saveThemePreference = async (nextTheme: ThemePreference) => {
+    const previous = appearance;
+    const nextAppearance = { ...appearance, themePreference: nextTheme };
+    setTheme(nextTheme);
+    setAppearance(nextAppearance);
+    try {
+      const saved = await updateAppearanceSettings(adminToken, { themePreference: nextTheme });
+      setAppearance(saved);
+    } catch {
+      setAppearance(previous);
+      setTheme(previous.themePreference);
+    }
+  };
+
+  const saveCodexTheme = async (
+    codexTheme: ImportedCodexTheme,
+    options: { switchToVariant?: boolean } = {}
+  ) => {
+    const previous = appearance;
+    const nextAppearance = {
+      ...appearance,
+      codexThemes: {
+        ...appearance.codexThemes,
+        [codexTheme.variant]: codexTheme
+      }
+    };
+    setAppearance(nextAppearance);
+    if (options.switchToVariant) {
+      setTheme(codexTheme.variant);
+    }
+    try {
+      const saved = await updateAppearanceSettings(adminToken, {
+        codexTheme,
+        ...(options.switchToVariant ? { themePreference: codexTheme.variant } : {})
+      });
+      setAppearance(saved);
+    } catch {
+      setAppearance(previous);
+      if (options.switchToVariant) {
+        setTheme(previous.themePreference);
+      }
+    }
+  };
+
+  const clearCodexTheme = async (variant: ImportedCodexTheme['variant']) => {
+    const previous = appearance;
+    const nextCodexThemes = { ...appearance.codexThemes };
+    delete nextCodexThemes[variant];
+    const nextAppearance = {
+      ...appearance,
+      codexThemes: nextCodexThemes
+    };
+    setAppearance(nextAppearance);
+    try {
+      const saved = await updateAppearanceSettings(adminToken, { clearVariant: variant });
+      setAppearance(saved);
+    } catch {
+      setAppearance(previous);
     }
   };
 
@@ -3417,7 +3802,7 @@ function SettingsScreen({
   const selectedPairPin = selectedPairDevice
     ? devicePins[selectedPairDevice.deviceId]
     : pin
-      ? { pin, expiresAt: pinExpiresAt }
+      ? { pin, expiresAt: pinExpiresAt, ...(pinDeviceName ? { deviceName: pinDeviceName } : {}) }
       : undefined;
   const selectedPairPinValue = selectedPairPin?.pin ?? '';
   const selectedPairPinExpiresAt = selectedPairPin?.expiresAt;
@@ -3430,7 +3815,7 @@ function SettingsScreen({
     void onPair(
       selectedPairDevice
         ? { pin: selectedPairPinValue, existingDeviceId: selectedPairDevice.deviceId }
-        : { pin: selectedPairPinValue, deviceName: 'Admin tablet' }
+        : { pin: selectedPairPinValue, deviceName: newDeviceName.trim() || 'Admin tablet' }
     );
   };
 
@@ -3559,9 +3944,24 @@ function SettingsScreen({
               </select>
             </label>
           ) : null}
+          {!selectedPairDevice ? (
+            <label>
+              New device name
+              <input
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                value={newDeviceName}
+                onChange={(event) => setNewDeviceName(event.target.value)}
+              />
+            </label>
+          ) : null}
           {selectedPairPinValue ? (
             <div className="pin-stack">
               <div className="pin-display">{selectedPairPinValue}</div>
+              {selectedPairPin?.deviceName ? (
+                <p className="simple-copy">For {selectedPairPin.deviceName}.</p>
+              ) : null}
               {selectedPairPinExpiresAt ? (
                 <p className="simple-copy">Expires {new Date(selectedPairPinExpiresAt).toLocaleString()}.</p>
               ) : null}
@@ -3603,9 +4003,15 @@ function SettingsScreen({
           <PanelHeading
             icon={<Palette size={22} />}
             title="Appearance"
-            description="Choose the display mode for this device."
+            description="Choose the admin theme and import Codex theme files."
           />
-          <ThemeSegmentedControl theme={theme} onChange={setTheme} />
+          <ThemeSegmentedControl theme={theme} onChange={(next) => void saveThemePreference(next)} />
+          <CodexThemeImporter
+            appearance={appearance}
+            onClear={(variant) => void clearCodexTheme(variant)}
+            onImport={(codexTheme) => void saveCodexTheme(codexTheme, { switchToVariant: true })}
+            onUpdate={(codexTheme) => void saveCodexTheme(codexTheme)}
+          />
         </section>
 
         <ChangePasscodeCard adminToken={adminToken} />
@@ -3626,11 +4032,54 @@ function SettingsScreen({
               {devices.map((device) => (
                 <li key={device.deviceId}>
                   <div className="device-copy">
-                    <span>{device.deviceName}</span>
+                    {editingDeviceId === device.deviceId ? (
+                      <form
+                        className="device-name-edit"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void submitDeviceRename(device.deviceId);
+                        }}
+                      >
+                        <input
+                          aria-label={`Device name for ${device.deviceName}`}
+                          autoCapitalize="off"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          value={editingDeviceName}
+                          onChange={(event) => setEditingDeviceName(event.target.value)}
+                        />
+                        <button
+                          className="icon-button"
+                          type="submit"
+                          title="Save name"
+                          disabled={!editingDeviceName.trim()}
+                        >
+                          <CheckCircle2 size={16} />
+                        </button>
+                        <button
+                          className="icon-button"
+                          type="button"
+                          title="Cancel rename"
+                          onClick={cancelDeviceRename}
+                        >
+                          <XCircle size={16} />
+                        </button>
+                      </form>
+                    ) : (
+                      <span>{device.deviceName}</span>
+                    )}
                     <small>{formatDeviceSeen(device.lastSeenAt)}</small>
                     <small>{formatDevicePin(devicePins[device.deviceId])}</small>
                   </div>
                   <div className="device-actions">
+                    <button
+                      className="icon-button"
+                      type="button"
+                      title="Rename"
+                      onClick={() => startDeviceRename(device)}
+                    >
+                      <Pencil size={16} />
+                    </button>
                     <button
                       className="icon-button"
                       type="button"
@@ -3680,6 +4129,7 @@ function SettingsScreen({
               ))}
             </ul>
           )}
+          {renameError ? <p className="form-error">{renameError}</p> : null}
         </section>
       </section>
     </main>
@@ -4310,6 +4760,10 @@ function normalizeEnabledProvidersForUi(input: unknown): AgentProvider[] {
   return uniqueProviders.length > 0 ? uniqueProviders : [...AGENT_PROVIDERS];
 }
 
+function normalizeAppearanceSettingsForUi(input: unknown): AppearanceSettings {
+  return normalizeAppearanceSettings(input ?? defaultAppearanceSettings());
+}
+
 function activeAdminDevices(devices: AdminDevice[]): AdminDevice[] {
   return devices.filter((device) => !device.revokedAt);
 }
@@ -4648,4 +5102,263 @@ function ThemeSegmentedControl({
       })}
     </div>
   );
+}
+
+function CodexThemeImporter({
+  appearance,
+  onClear,
+  onImport,
+  onUpdate
+}: {
+  appearance: AppearanceSettings;
+  onClear: (variant: ImportedCodexTheme['variant']) => void;
+  onImport: (codexTheme: ImportedCodexTheme) => void;
+  onUpdate: (codexTheme: ImportedCodexTheme) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [themeText, setThemeText] = useState('');
+  const [importError, setImportError] = useState('');
+  const [importStatus, setImportStatus] = useState('');
+
+  const importSource = (source: string, sourceName?: string) => {
+    try {
+      const parsed = parseCodexThemeImport(source, sourceName);
+      setImportError('');
+      setImportStatus(`${variantLabel(parsed.variant)} theme imported`);
+      setThemeText('');
+      onImport(parsed);
+    } catch (error) {
+      setImportStatus('');
+      setImportError(error instanceof Error ? error.message : 'Could not import theme.');
+    }
+  };
+
+  const importFile = async (file: File | undefined) => {
+    if (!file) {
+      return;
+    }
+    importSource(await file.text(), file.name);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="codex-theme-importer">
+      <div className="codex-theme-slots">
+        {(['light', 'dark'] as const).map((variant) => {
+          const imported = appearance.codexThemes[variant];
+          const themeForVariant = imported ?? defaultCodexTheme(variant);
+          return (
+            <div key={variant} className={`codex-theme-slot ${imported ? 'has-theme' : ''}`}>
+              <div className="codex-theme-slot-header">
+                <div className="codex-theme-slot-copy">
+                  <span>{variantLabel(variant)} theme</span>
+                  <small>{imported ? imported.codeThemeId ?? imported.sourceName ?? 'Custom saved colors' : 'Default colors'}</small>
+                </div>
+                <div className="codex-theme-swatch-row" aria-hidden="true">
+                  <span style={{ background: themeForVariant.theme.surface }} />
+                  <span style={{ background: themeForVariant.theme.ink }} />
+                  <span style={{ background: themeForVariant.theme.accent }} />
+                </div>
+                {imported ? (
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title={`Clear ${variantLabel(variant)} theme`}
+                    onClick={() => onClear(variant)}
+                  >
+                    <XCircle size={16} />
+                  </button>
+                ) : null}
+              </div>
+              <ThemeColorEditor
+                theme={themeForVariant}
+                onUpdate={(nextTheme) => {
+                  setImportError('');
+                  setImportStatus(`${variantLabel(nextTheme.variant)} colors saved`);
+                  onUpdate(nextTheme);
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="codex-theme-import-box">
+        <textarea
+          className="codex-theme-input"
+          value={themeText}
+          onChange={(event) => {
+            setImportError('');
+            setImportStatus('');
+            setThemeText(event.target.value);
+          }}
+          placeholder="Paste codex-theme-v1:{...}"
+          spellCheck={false}
+        />
+        <div className="codex-theme-actions">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,.txt,.theme"
+            className="visually-hidden"
+            onChange={(event) => {
+              void importFile(event.currentTarget.files?.[0]);
+            }}
+          />
+          <button
+            className="secondary-action"
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload size={16} />
+            File
+          </button>
+          <button
+            className="secondary-action"
+            type="button"
+            disabled={!themeText.trim()}
+            onClick={() => importSource(themeText)}
+          >
+            Paste
+          </button>
+        </div>
+      </div>
+      {importError ? <p className="form-error">{importError}</p> : null}
+      {importStatus ? <p className="simple-copy">{importStatus}</p> : null}
+    </div>
+  );
+}
+
+function variantLabel(variant: ImportedCodexTheme['variant']): string {
+  return variant === 'light' ? 'Light' : 'Dark';
+}
+
+function defaultCodexTheme(variant: ImportedCodexTheme['variant']): ImportedCodexTheme {
+  if (variant === 'dark') {
+    return {
+      codeThemeId: 'github',
+      sourceName: 'Default dark',
+      theme: {
+        accent: '#1f6feb',
+        contrast: 89,
+        fonts: {
+          code: null,
+          ui: 'Inter'
+        },
+        ink: '#e6edf3',
+        opaqueWindows: false,
+        semanticColors: {
+          diffAdded: '#2ea043',
+          diffRemoved: '#f85149',
+          skill: '#58a6ff'
+        },
+        surface: '#0d1117'
+      },
+      variant
+    };
+  }
+
+  return {
+    codeThemeId: 'notion',
+    sourceName: 'Default light',
+    theme: {
+      accent: '#3183d8',
+      contrast: 45,
+      fonts: {
+        code: null,
+        ui: null
+      },
+      ink: '#37352f',
+      opaqueWindows: true,
+      semanticColors: {
+        diffAdded: '#008000',
+        diffRemoved: '#a31515',
+        skill: '#0000ff'
+      },
+      surface: '#ffffff'
+    },
+    variant
+  };
+}
+
+function ThemeColorEditor({
+  theme,
+  onUpdate
+}: {
+  theme: ImportedCodexTheme;
+  onUpdate: (codexTheme: ImportedCodexTheme) => void;
+}) {
+  const updateThemeColor = (field: 'accent' | 'ink' | 'surface', value: string) => {
+    onUpdate({
+      ...theme,
+      sourceName: theme.sourceName ?? theme.codeThemeId ?? `${variantLabel(theme.variant)} custom theme`,
+      theme: {
+        ...theme.theme,
+        [field]: value
+      }
+    });
+  };
+
+  const updateSemanticColor = (
+    field: keyof ImportedCodexTheme['theme']['semanticColors'],
+    value: string
+  ) => {
+    onUpdate({
+      ...theme,
+      sourceName: theme.sourceName ?? theme.codeThemeId ?? `${variantLabel(theme.variant)} custom theme`,
+      theme: {
+        ...theme.theme,
+        semanticColors: {
+          ...theme.theme.semanticColors,
+          [field]: value
+        }
+      }
+    });
+  };
+
+  return (
+    <div className="codex-theme-editor" aria-label={`${variantLabel(theme.variant)} theme colors`}>
+      <ThemeColorField label="Accent" value={theme.theme.accent} onChange={(value) => updateThemeColor('accent', value)} />
+      <ThemeColorField label="Background" value={theme.theme.surface} onChange={(value) => updateThemeColor('surface', value)} />
+      <ThemeColorField label="Foreground" value={theme.theme.ink} onChange={(value) => updateThemeColor('ink', value)} />
+      <ThemeColorField
+        label="Added diff"
+        value={theme.theme.semanticColors.diffAdded ?? '#008000'}
+        onChange={(value) => updateSemanticColor('diffAdded', value)}
+      />
+      <ThemeColorField
+        label="Removed diff"
+        value={theme.theme.semanticColors.diffRemoved ?? '#a31515'}
+        onChange={(value) => updateSemanticColor('diffRemoved', value)}
+      />
+    </div>
+  );
+}
+
+function ThemeColorField({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="codex-theme-color-field">
+      <span>{label}</span>
+      <input
+        type="color"
+        value={toColorInputValue(value)}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+      <span className="codex-theme-hex">{toColorInputValue(value).toUpperCase()}</span>
+    </label>
+  );
+}
+
+function toColorInputValue(value: string): string {
+  const withoutAlpha = value.slice(0, 7);
+  return /^#[0-9a-fA-F]{6}$/.test(withoutAlpha) ? withoutAlpha : '#000000';
 }

@@ -30,6 +30,8 @@ Success criteria:
 - use the smallest relevant local context before editing
 - create or update an active execution plan before complex, ambiguous, or
   non-trivial code changes
+- create or refresh `docs/exec-plans/active/mission.json` before broad, risky,
+  architectural, release, or project-level implementation
 - run validation and record evidence before claiming completion
 
 Constraints:
@@ -47,6 +49,7 @@ Constraints:
 Evidence required:
 
 - validation evidence
+- passing mission proof when Mission Mode is active
 - review evidence when required by the harness policy
 - completion status in the active execution plan
 - retained artifact paths when durable evidence is needed

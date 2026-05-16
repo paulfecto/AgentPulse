@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { CodexAppServerChat, SendBlockedError, type CodexAppServerTransport } from './app-server-chat';
 
@@ -118,9 +121,78 @@ describe('Codex App Server same-thread chat', () => {
           '[x] Read the code',
           '[*] Wire plan mode',
           '[ ] Run tests'
-        ].join('\n')
+        ].join('\n'),
+        planItems: [
+          { step: 'Read the code', status: 'completed' },
+          { step: 'Wire plan mode', status: 'in_progress' },
+          { step: 'Run tests', status: 'pending' }
+        ]
       })
     ]);
+  });
+
+  it('keeps app-server plan updates visible after the turn completes', () => {
+    const transport = eventTransport();
+    const chat = new CodexAppServerChat(transport);
+
+    transport.emitNotification({
+      method: 'turn/started',
+      params: {
+        threadId: 'thread-1',
+        turn: turn('turn-1', 'inProgress')
+      }
+    });
+    transport.emitNotification({
+      method: 'turn/plan/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        plan: [
+          { step: 'Check the plan UI', status: 'completed' },
+          { step: 'Implement the fix', status: 'in_progress' }
+        ]
+      }
+    });
+    transport.emitNotification({
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: turn('turn-1', 'completed')
+      }
+    });
+
+    const visible = chat.applyLiveState(
+      {
+        ...emptyTranscript('thread-1'),
+        messages: [
+          {
+            id: 'user-1',
+            role: 'user',
+            kind: 'message',
+            text: 'Please implement this plan.',
+            turnId: 'turn-1',
+            createdAt: '2026-05-07T10:00:00.000Z'
+          },
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            kind: 'message',
+            text: 'Done.',
+            phase: 'final_answer',
+            turnId: 'turn-1',
+            createdAt: '2026-05-07T10:00:00.000Z'
+          }
+        ]
+      },
+      'thread-1'
+    );
+
+    expect(visible.messages.map((message) => message.id)).toEqual(['user-1', 'plan:turn-1', 'assistant-1']);
+    expect(visible.messages[1]).toMatchObject({
+      role: 'activity',
+      kind: 'plan',
+      text: ['[x] Check the plan UI', '[*] Implement the fix'].join('\n')
+    });
   });
 
   it('emits app-server thread status changes as tablet live events', () => {
@@ -147,7 +219,285 @@ describe('Codex App Server same-thread chat', () => {
     expect(chat.isThreadStreaming('thread-1')).toBe(true);
   });
 
-  it('keeps a thread working when a stale idle status arrives before turn completion', () => {
+  it('clears stale running state as soon as app-server reports the thread idle', () => {
+    const transport = eventTransport();
+    const chat = new CodexAppServerChat(transport);
+    const liveEvents: unknown[] = [];
+    chat.onLiveEvent((event) => liveEvents.push(event));
+
+    transport.emitNotification({
+      method: 'turn/started',
+      params: {
+        threadId: 'thread-1',
+        turn: turn('turn-1', 'inProgress')
+      }
+    });
+    transport.emitNotification({
+      method: 'thread/status/changed',
+      params: {
+        threadId: 'thread-1',
+        status: { type: 'idle' }
+      }
+    });
+
+    const visible = chat.applyLiveState(emptyTranscript('thread-1'), 'thread-1');
+
+    expect(chat.isThreadStreaming('thread-1')).toBe(false);
+    expect(visible.activeTurnId).toBeNull();
+    expect(visible.sendState).toMatchObject({
+      canSend: true,
+      reason: 'ready'
+    });
+    expect(liveEvents).toContainEqual({
+      type: 'thread/status/changed',
+      payload: {
+        threadId: 'thread-1',
+        status: 'idle'
+      }
+    });
+    expect(liveEvents).toContainEqual({
+      type: 'thread/streaming-changed',
+      payload: { threadId: 'thread-1', isStreaming: false }
+    });
+  });
+
+  it('merges app-server token usage updates into live goal progress', () => {
+    const transport = eventTransport();
+    const chat = new CodexAppServerChat(transport);
+    const liveEvents: unknown[] = [];
+    const liveStateChanges: string[] = [];
+    chat.onLiveEvent((event) => liveEvents.push(event));
+    chat.onLiveStateChange((threadId) => liveStateChanges.push(threadId));
+
+    transport.emitNotification({
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        goal: {
+          threadId: 'thread-1',
+          objective: 'Finish goal progress',
+          status: 'active',
+          tokenBudget: 4000,
+          tokensUsed: 0,
+          timeUsedSeconds: 30,
+          createdAt: 1_777_000_000,
+          updatedAt: 1_777_000_030
+        }
+      }
+    });
+    transport.emitNotification({
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        tokenUsage: {
+          total: {
+            totalTokens: 1234,
+            inputTokens: 700,
+            cachedInputTokens: 100,
+            outputTokens: 400,
+            reasoningOutputTokens: 34
+          },
+          last: {
+            totalTokens: 800,
+            inputTokens: 500,
+            cachedInputTokens: 50,
+            outputTokens: 200,
+            reasoningOutputTokens: 50
+          },
+          modelContextWindow: 4000
+        }
+      }
+    });
+    transport.emitNotification({
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        tokenUsage: {
+          total: {
+            totalTokens: 1434,
+            inputTokens: 800,
+            cachedInputTokens: 100,
+            outputTokens: 500,
+            reasoningOutputTokens: 34
+          },
+          last: {
+            totalTokens: 1000,
+            inputTokens: 600,
+            cachedInputTokens: 50,
+            outputTokens: 300,
+            reasoningOutputTokens: 50
+          },
+          modelContextWindow: 4000
+        }
+      }
+    });
+
+    const visible = chat.applyLiveState(emptyTranscript('thread-1'), 'thread-1');
+
+    expect(visible.goal).toMatchObject({
+      threadId: 'thread-1',
+      objective: 'Finish goal progress',
+      tokensUsed: 200,
+      timeUsedSeconds: 30
+    });
+    expect(visible.usage).toMatchObject({
+      contextTokens: 1000,
+      contextWindow: 4000,
+      contextUsedPercent: 25
+    });
+    expect(liveEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'thread/goal/changed',
+          payload: expect.objectContaining({
+            threadId: 'thread-1',
+            goal: expect.objectContaining({ tokensUsed: 200 })
+          })
+        })
+      ])
+    );
+    expect(liveStateChanges).toContain('thread-1');
+  });
+
+  it('uses the goal update turn id when stopping an active goal thread', async () => {
+    const transport = eventTransport();
+    const chat = new CodexAppServerChat(transport);
+
+    transport.emitNotification({
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-goal',
+        turnId: 'goal-turn-1',
+        goal: {
+          threadId: 'thread-goal',
+          objective: 'Keep working until stopped',
+          status: 'active',
+          tokenBudget: null,
+          tokensUsed: 0,
+          timeUsedSeconds: 0,
+          createdAt: 1_777_000_000,
+          updatedAt: 1_777_000_000
+        }
+      }
+    });
+
+    const visible = chat.applyLiveState(emptyTranscript('thread-goal'), 'thread-goal');
+
+    expect(chat.isThreadStreaming('thread-goal')).toBe(true);
+    expect(visible.activeTurnId).toBe('goal-turn-1');
+
+    await chat.interruptTurn('thread-goal');
+
+    expect(transport.calls).toContainEqual({
+      method: 'turn/interrupt',
+      params: {
+        threadId: 'thread-goal',
+        turnId: 'goal-turn-1'
+      }
+    });
+    expect(chat.isThreadStreaming('thread-goal')).toBe(false);
+  });
+
+  it('keeps computed goal token usage when a later goal update reports lower usage', () => {
+    const transport = eventTransport();
+    const chat = new CodexAppServerChat(transport);
+
+    transport.emitNotification({
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-goal',
+        turnId: 'goal-turn-1',
+        goal: {
+          threadId: 'thread-goal',
+          objective: 'Finish goal progress',
+          status: 'active',
+          tokenBudget: null,
+          tokensUsed: 0,
+          timeUsedSeconds: 30,
+          createdAt: 1_777_000_000,
+          updatedAt: 1_777_000_030
+        }
+      }
+    });
+    transport.emitNotification({
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: 'thread-goal',
+        turnId: 'goal-turn-1',
+        tokenUsage: {
+          total: {
+            totalTokens: 1000,
+            inputTokens: 700,
+            cachedInputTokens: 0,
+            outputTokens: 250,
+            reasoningOutputTokens: 50
+          },
+          last: {
+            totalTokens: 1000,
+            inputTokens: 700,
+            cachedInputTokens: 0,
+            outputTokens: 250,
+            reasoningOutputTokens: 50
+          },
+          modelContextWindow: 4000
+        }
+      }
+    });
+    transport.emitNotification({
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: 'thread-goal',
+        turnId: 'goal-turn-1',
+        tokenUsage: {
+          total: {
+            totalTokens: 1250,
+            inputTokens: 800,
+            cachedInputTokens: 0,
+            outputTokens: 350,
+            reasoningOutputTokens: 100
+          },
+          last: {
+            totalTokens: 1250,
+            inputTokens: 800,
+            cachedInputTokens: 0,
+            outputTokens: 350,
+            reasoningOutputTokens: 100
+          },
+          modelContextWindow: 4000
+        }
+      }
+    });
+    transport.emitNotification({
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-goal',
+        turnId: 'goal-turn-1',
+        goal: {
+          threadId: 'thread-goal',
+          objective: 'Finish goal progress',
+          status: 'complete',
+          tokenBudget: null,
+          tokensUsed: 0,
+          timeUsedSeconds: 10,
+          createdAt: 1_777_000_000,
+          updatedAt: 1_777_000_100
+        }
+      }
+    });
+
+    const visible = chat.applyLiveState(emptyTranscript('thread-goal'), 'thread-goal');
+
+    expect(visible.goal).toMatchObject({
+      status: 'complete',
+      tokensUsed: 250,
+      timeUsedSeconds: 30
+    });
+  });
+
+  it('clears a thread when app-server idle status arrives before turn completion', () => {
     const transport = eventTransport();
     const chat = new CodexAppServerChat(transport);
     const liveEvents: unknown[] = [];
@@ -168,17 +518,24 @@ describe('Codex App Server same-thread chat', () => {
       }
     });
 
-    expect(chat.isThreadStreaming('thread-1')).toBe(true);
+    expect(chat.isThreadStreaming('thread-1')).toBe(false);
     expect(chat.applyLiveState(emptyTranscript('thread-1'), 'thread-1').sendState).toMatchObject({
-      canSend: false,
-      reason: 'thread_changed',
-      label: 'Codex is working'
+      canSend: true,
+      reason: 'ready',
+      label: 'Ready'
     });
     expect(liveEvents).toContainEqual({
       type: 'thread/status/changed',
       payload: {
         threadId: 'thread-1',
-        status: 'running'
+        status: 'idle'
+      }
+    });
+    expect(liveEvents).toContainEqual({
+      type: 'thread/streaming-changed',
+      payload: {
+        threadId: 'thread-1',
+        isStreaming: false
       }
     });
 
@@ -222,7 +579,7 @@ describe('Codex App Server same-thread chat', () => {
       expect.objectContaining({
         id: 'compact-item-1',
         role: 'activity',
-        kind: 'status',
+        kind: 'compacted',
         phase: 'context_compaction',
         text: 'Automatically compacting context',
         turnId: 'turn-compact'
@@ -262,12 +619,194 @@ describe('Codex App Server same-thread chat', () => {
       expect.objectContaining({
         id: 'compact-item-1',
         role: 'activity',
-        kind: 'status',
+        kind: 'compacted',
         phase: 'context_compaction',
         text: 'Automatically compacting context',
         turnId: 'turn-compact'
       })
     ]);
+  });
+
+  it('adds saved requestUserInput question and plan mode from the rollout file', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'agent-pulse-rollout-'));
+    const rolloutPath = path.join(dir, 'rollout.jsonl');
+    const writeLine = (value: unknown) => JSON.stringify(value);
+    await writeFile(
+      rolloutPath,
+      [
+        writeLine({
+          timestamp: '2026-05-06T19:25:00.000Z',
+          type: 'turn_context',
+          payload: {
+            turn_id: 'turn-plan',
+            collaboration_mode: { mode: 'plan' }
+          }
+        }),
+        writeLine({
+          timestamp: '2026-05-06T19:26:00.000Z',
+          type: 'response_item',
+          payload: {
+            type: 'function_call',
+            name: 'request_user_input',
+            call_id: 'call-question',
+            arguments: JSON.stringify({
+              questions: [
+                {
+                  id: 'first_admin_bootstrap',
+                  question: 'How should the first admin be created?'
+                }
+              ]
+            })
+          }
+        }),
+        writeLine({
+          timestamp: '2026-05-06T19:27:00.000Z',
+          type: 'response_item',
+          payload: {
+            type: 'function_call_output',
+            call_id: 'call-question',
+            output: JSON.stringify({
+              answers: {
+                first_admin_bootstrap: { answers: ['Manual DB insert'] }
+              }
+            })
+          }
+        })
+      ].join('\n')
+    );
+
+    try {
+      const transport = fakeTransport([
+        threadResponse('thread-plan', 'idle', [
+          {
+            ...turn('turn-plan', 'completed'),
+            items: [
+              {
+                type: 'plan',
+                id: 'plan-1',
+                text: 'Final plan'
+              }
+            ]
+          }
+        ])
+      ]);
+      const chat = new CodexAppServerChat(transport, {
+        rolloutLookup: { findRolloutPath: vi.fn(async () => rolloutPath) }
+      });
+
+      const transcript = await chat.readTranscript('thread-plan');
+
+      expect(transcript.collaborationMode).toBe('plan');
+      expect(transcript.messages.map((message) => message.id)).toEqual([
+        'codex-user-input:call-question',
+        'plan-1'
+      ]);
+      expect(transcript.messages[0]).toMatchObject({
+        role: 'activity',
+        kind: 'status',
+        phase: 'user_input',
+        text: [
+          'Asked 1 question',
+          'How should the first admin be created?',
+          'Answer: Manual DB insert'
+        ].join('\n')
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('adds screenshots from old rollout tool outputs before the assistant reply', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'agent-pulse-rollout-image-'));
+    const rolloutPath = path.join(dir, 'rollout.jsonl');
+    const writeLine = (value: unknown) => JSON.stringify(value);
+    await writeFile(
+      rolloutPath,
+      [
+        writeLine({
+          timestamp: '2026-05-07T05:00:00.000Z',
+          type: 'turn_context',
+          payload: {
+            turn_id: 'turn-shot',
+            collaboration_mode: { mode: 'default' }
+          }
+        }),
+        writeLine({
+          timestamp: '2026-05-07T05:00:01.000Z',
+          type: 'response_item',
+          payload: {
+            type: 'function_call',
+            name: 'node_repl.js',
+            call_id: 'call-shot',
+            arguments: JSON.stringify({
+              title: 'Verify setup-first settings'
+            })
+          }
+        }),
+        writeLine({
+          timestamp: '2026-05-07T05:00:02.000Z',
+          type: 'response_item',
+          payload: {
+            type: 'function_call_output',
+            call_id: 'call-shot',
+            output: JSON.stringify({
+              result: {
+                type: 'success',
+                content: [
+                  {
+                    type: 'image',
+                    data: 'aGVsbG8=',
+                    mimeType: 'image/jpeg'
+                  }
+                ]
+              }
+            })
+          }
+        })
+      ].join('\n')
+    );
+
+    try {
+      const transport = fakeTransport([
+        threadResponse('thread-shot', 'idle', [
+          {
+            ...turn('turn-shot', 'completed'),
+            items: [
+              {
+                type: 'agentMessage',
+                id: 'assistant-1',
+                text: 'The setup screen is better.',
+                phase: 'final_answer'
+              }
+            ]
+          }
+        ])
+      ]);
+      const chat = new CodexAppServerChat(transport, {
+        rolloutLookup: { findRolloutPath: vi.fn(async () => rolloutPath) }
+      });
+
+      const transcript = await chat.readTranscript('thread-shot');
+
+      expect(transcript.messages.map((message) => message.id)).toEqual([
+        'codex-rollout-image:call-shot',
+        'assistant-1'
+      ]);
+      expect(transcript.messages[0]).toMatchObject({
+        role: 'activity',
+        kind: 'tool',
+        phase: 'screenshot',
+        text: 'node_repl.js returned image',
+        attachments: [
+          expect.objectContaining({
+            kind: 'image',
+            url: 'data:image/jpeg;base64,aGVsbG8='
+          })
+        ]
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('stores app-server approval requests and answers the same request id', async () => {
@@ -338,6 +877,37 @@ describe('Codex App Server same-thread chat', () => {
 
     expect(chat.isThreadWaitingForApproval('thread-approval')).toBe(false);
     expect(chat.getPendingApprovalRequests('thread-approval')).toEqual([]);
+  });
+
+  it('shows requestUserInput waits as user input instead of generic approval', () => {
+    const transport = eventTransport();
+    const chat = new CodexAppServerChat(transport);
+
+    transport.emitServerRequest({
+      id: 42,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-question',
+        turnId: 'turn-7',
+        questions: [{ id: 'choice', question: 'Continue?' }]
+      }
+    });
+
+    const visible = chat.applyLiveState(emptyTranscript('thread-question'), 'thread-question');
+
+    expect(visible.sendState).toMatchObject({
+      canSend: false,
+      reason: 'waiting_on_user_input',
+      label: 'Codex needs your answer.'
+    });
+    expect(visible.messages).toEqual([
+      expect.objectContaining({
+        id: 'codex-user-input:42',
+        kind: 'status',
+        phase: 'user_input',
+        text: ['Asked 1 question', 'Continue?', 'Waiting for answer'].join('\n')
+      })
+    ]);
   });
 
   it('interrupts the active app-server turn', async () => {
@@ -480,7 +1050,7 @@ describe('Codex App Server same-thread chat', () => {
       threadId: 'thread-1',
       input: [
         { type: 'text', text: 'Please inspect this.', text_elements: [] },
-        { type: 'input_image', image_url: { url: imageUrl } }
+        { type: 'image', image_url: { url: imageUrl } }
       ]
     });
   });
@@ -796,7 +1366,7 @@ describe('Codex App Server same-thread chat', () => {
     });
   });
 
-  it('uses Codex auto defaults when project config does not pin access settings', async () => {
+  it('uses Codex default permissions when project config does not pin access settings', async () => {
     const cwd = '/Users/me/projects/CodexPulse';
     const transport = fakeTransport([
       {
@@ -837,6 +1407,23 @@ describe('Codex App Server same-thread chat', () => {
       approvalPolicy: 'on-request',
       sandbox: 'workspace-write',
       config: {}
+    });
+  });
+
+  it('starts a new project thread with the selected full-access permission mode', async () => {
+    const cwd = '/Users/me/projects/CodexPulse';
+    const transport = fakeTransport([
+      { config: { model: 'gpt-5.5' } },
+      threadResponse('thread-new', 'idle', [], [], cwd)
+    ]);
+    const chat = new CodexAppServerChat(transport);
+
+    await chat.startThread(cwd, { permissionMode: 'fullAccess' });
+
+    expect(transport.calls.find((call) => call.method === 'thread/start')?.params).toMatchObject({
+      cwd,
+      approvalPolicy: 'never',
+      sandbox: 'danger-full-access'
     });
   });
 
@@ -885,6 +1472,33 @@ describe('Codex App Server same-thread chat', () => {
     });
   });
 
+  it('passes the selected auto-review permission mode to a new turn', async () => {
+    const transport = fakeTransport([
+      {
+        ...threadResponse('thread-1', 'idle', [], [], '/Users/me/projects/CodexPulse'),
+        approvalPolicy: 'on-request',
+        sandbox: { type: 'workspaceWrite' }
+      },
+      threadResponse('thread-1', 'active', [turn('turn-new', 'inProgress')])
+    ]);
+    const chat = new CodexAppServerChat(transport);
+
+    await chat.sendMessage('thread-1', 'Inspect safely.', { permissionMode: 'autoReview' });
+
+    expect(transport.calls.find((call) => call.method === 'turn/start')?.params).toMatchObject({
+      threadId: 'thread-1',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: ['/Users/me/projects/CodexPulse'],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false
+      }
+    });
+  });
+
   it('passes collaboration mode to app-server turn/steer for active plan threads', async () => {
     const transport = fakeTransport([
       threadResponse('thread-1', 'active', [turn('turn-live', 'inProgress')]),
@@ -911,7 +1525,7 @@ describe('Codex App Server same-thread chat', () => {
     });
   });
 
-  it('blocks mobile sends when Codex is waiting for approval on the Mac', async () => {
+  it('blocks mobile sends when Codex is waiting for approval on the helper computer', async () => {
     const transport = fakeTransport([
       threadResponse('thread-1', 'active', [turn('turn-live', 'inProgress')], ['waitingOnApproval'])
     ]);
@@ -1074,7 +1688,7 @@ describe('Codex App Server same-thread chat', () => {
               id: 'user-1',
               content: [
                 { type: 'input_text', text: 'Please inspect this screenshot.', text_elements: [] },
-                { type: 'input_image', image_url: { url: userScreenshot } },
+                { type: 'image', image_url: { url: userScreenshot } },
                 { type: 'localImage', path: localScreenshot }
               ]
             },

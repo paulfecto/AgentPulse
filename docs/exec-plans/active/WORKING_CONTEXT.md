@@ -1,12 +1,12 @@
 # Working Context
 
-- task id: `agentos-convergence`
-- plan: `docs/exec-plans/active/agentos-convergence.md`
+- task id: `upstream-product-sync`
+- plan: `docs/exec-plans/active/upstream-product-sync.md`
 - owner lane: `codex`
 - status: `in-progress`
 - latest routing decision: `none`
 - blocker: `none`
-- last updated: `2026-05-10T10:34:55Z`
+- last updated: `2026-05-16T03:38:59Z`
 
 ## Proof Queue
 
@@ -21,8 +21,16 @@
 ## Resume Cursor
 
 - status: `in-progress`
-- latest heartbeat: `2026-05-10T10:32:33Z`
+- latest heartbeat: `2026-05-16T03:36:58Z`
 - continuation hint: none
+
+## Mission
+
+- enabled: `False`
+- status: `inactive`
+- verifier lane: `none`
+- milestones: `0` / `0`
+- next incomplete milestone: `none`
 
 ## Termination Supervisor
 

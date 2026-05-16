@@ -1,21 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import path from 'node:path';
 import { createServer } from 'node:net';
 import {
   AGENT_PROVIDERS,
   AgentProviderSchema,
+  AppearanceSettingsSchema,
   type AgentProvider,
+  type AppearanceSettings,
   type RemoteAccessSettings,
   type WatchNotificationsSettings
 } from '@agent-pulse/shared';
+import { agentPulseDataPath } from '../platform/paths';
 
 export type HelperSettings = {
   port: number;
   lanEnabled: boolean;
   mobileSendEnabled: boolean;
   enabledProviders?: AgentProvider[];
+  appearance?: AppearanceSettings;
   remoteAccess: RemoteAccessSettings;
   watchNotifications?: WatchNotificationsSettings;
 };
@@ -24,13 +27,7 @@ export class HelperSettingsStore {
   constructor(
     private readonly settingsPath =
       process.env.AGENT_PULSE_SETTINGS_PATH?.trim() ||
-      path.join(
-        homedir(),
-        'Library',
-        'Application Support',
-        'Agent Pulse',
-        'settings.json'
-      )
+      agentPulseDataPath('settings.json')
   ) {}
 
   async load(): Promise<HelperSettings> {
@@ -96,6 +93,7 @@ async function mergeSettings(
   return {
     ...defaults,
     ...stored,
+    appearance: normalizeAppearanceSettings(stored.appearance),
     enabledProviders: normalizeEnabledProviders(stored.enabledProviders),
     remoteAccess: {
       ...defaults.remoteAccess,
@@ -124,6 +122,7 @@ async function defaultSettings(settingsPath: string): Promise<HelperSettings> {
     lanEnabled: false,
     mobileSendEnabled: false,
     enabledProviders: [...AGENT_PROVIDERS],
+    appearance: defaultAppearanceSettings(),
     remoteAccess: {
       enabled: false,
       provider: 'cloudflare',
@@ -173,6 +172,17 @@ export function normalizeEnabledProviders(input: unknown): AgentProvider[] {
   const uniqueProviders = [...new Set(providers)];
 
   return uniqueProviders.length > 0 ? uniqueProviders : [...AGENT_PROVIDERS];
+}
+
+export function defaultAppearanceSettings(): AppearanceSettings {
+  return {
+    codexThemes: {},
+    themePreference: 'system'
+  };
+}
+
+export function normalizeAppearanceSettings(input: unknown): AppearanceSettings {
+  return AppearanceSettingsSchema.catch(defaultAppearanceSettings()).parse(input);
 }
 
 export async function pickFreeHighPort(): Promise<number> {

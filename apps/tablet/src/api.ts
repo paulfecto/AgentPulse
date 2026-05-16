@@ -1,6 +1,7 @@
 import {
   ApprovalDecisionResponseSchema,
   ApprovalInboxResponseSchema,
+  AppearanceSettingsSchema,
   CatalogCommandsResponseSchema,
   CatalogModelsResponseSchema,
   CatalogPluginsResponseSchema,
@@ -21,6 +22,9 @@ import {
   ThreadCreateResponseSchema,
   ThreadDeleteResponseSchema,
   ThreadFileChangeActionResponseSchema,
+  ThreadGoalClearResponseSchema,
+  ThreadGoalResponseSchema,
+  ThreadGoalUpdateRequestSchema,
   ThreadMessageResponseSchema,
   ThreadModelUpdateResponseSchema,
   ThreadStopResponseSchema,
@@ -32,8 +36,11 @@ import {
   WatchNotificationsSettingsSchema,
   ThreadListResponseSchema,
   type CollaborationModeKind,
+  type SelectableCodexPermissionModeId,
   type ApprovalDecisionRequest,
   type AgentProvider,
+  type AppearanceSettings,
+  type AppearanceSettingsUpdateRequest,
   type CatalogCommand,
   type CatalogModel,
   type CatalogPlugin,
@@ -49,6 +56,8 @@ import {
   type ProjectFilesResponse,
   type RemoteAccessSettings,
   type Thread,
+  type ThreadGoal,
+  type ThreadGoalUpdateRequest,
   type ThreadFileChangeActionRequest,
   type ThreadFileChangeSummary,
   type ThreadListGroup,
@@ -90,6 +99,7 @@ export type HelperSettingsSnapshot = {
   lanEnabled?: boolean;
   mobileSendEnabled?: boolean;
   enabledProviders?: AgentProvider[];
+  appearance?: AppearanceSettings;
   remoteAccess?: RemoteAccessSettings;
   watchNotifications?: WatchNotificationsSettings;
 };
@@ -220,6 +230,23 @@ export async function updateEnabledProviders(
 
   const payload = (await response.json()) as { settings?: HelperSettingsSnapshot };
   return payload.settings ?? {};
+}
+
+export async function updateAppearanceSettings(
+  token: string,
+  input: AppearanceSettingsUpdateRequest
+): Promise<AppearanceSettings> {
+  const response = await adminFetch('/settings/appearance', token, {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, 'Could not update appearance.'));
+  }
+
+  const payload = (await response.json()) as { appearance?: unknown };
+  return AppearanceSettingsSchema.parse(payload.appearance);
 }
 
 export async function configureCloudflareRemoteAccess(
@@ -543,9 +570,9 @@ export async function createTranscriptCommentDraft(
 
 export type StartThreadTarget =
   | string
-  | { location: 'chat'; provider?: AgentProvider; modelSlug?: string; reasoningEffort?: string }
-  | { projectId: string; provider?: AgentProvider; modelSlug?: string; reasoningEffort?: string }
-  | { cwd: string; provider?: AgentProvider; modelSlug?: string; reasoningEffort?: string };
+  | { location: 'chat'; provider?: AgentProvider; modelSlug?: string; reasoningEffort?: string; permissionMode?: SelectableCodexPermissionModeId }
+  | { projectId: string; provider?: AgentProvider; modelSlug?: string; reasoningEffort?: string; permissionMode?: SelectableCodexPermissionModeId }
+  | { cwd: string; provider?: AgentProvider; modelSlug?: string; reasoningEffort?: string; permissionMode?: SelectableCodexPermissionModeId };
 
 export async function startThread(
   session: AgentPulseSession,
@@ -730,13 +757,18 @@ export async function sendThreadMessage(
   session: AgentPulseSession,
   threadId: string,
   text: string,
-  options: { collaborationMode?: CollaborationModeKind; attachments?: ChatAttachment[] } = {}
+  options: {
+    collaborationMode?: CollaborationModeKind;
+    permissionMode?: SelectableCodexPermissionModeId;
+    attachments?: ChatAttachment[];
+  } = {}
 ): Promise<ThreadMessageResponse> {
   const response = await authedFetch(`/threads/${encodeURIComponent(threadId)}/messages`, session, {
     method: 'POST',
     body: JSON.stringify({
       text,
       ...(options.collaborationMode ? { collaborationMode: options.collaborationMode } : {}),
+      ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
       ...(options.attachments?.length ? { attachments: options.attachments } : {})
     })
   });
@@ -746,6 +778,50 @@ export async function sendThreadMessage(
   }
 
   return ThreadMessageResponseSchema.parse(await response.json());
+}
+
+export async function fetchThreadGoal(
+  session: AgentPulseSession,
+  threadId: string
+): Promise<ThreadGoal | null> {
+  const response = await authedFetch(`/threads/${encodeURIComponent(threadId)}/goal`, session);
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, 'Could not load Codex goal.'));
+  }
+  return ThreadGoalResponseSchema.parse(await response.json()).goal;
+}
+
+export async function updateThreadGoal(
+  session: AgentPulseSession,
+  threadId: string,
+  input: ThreadGoalUpdateRequest
+): Promise<ThreadGoal> {
+  const payload = ThreadGoalUpdateRequestSchema.parse(input);
+  const response = await authedFetch(`/threads/${encodeURIComponent(threadId)}/goal`, session, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, 'Could not update Codex goal.'));
+  }
+  const goal = ThreadGoalResponseSchema.parse(await response.json()).goal;
+  if (!goal) {
+    throw new Error('Codex did not return the updated goal.');
+  }
+  return goal;
+}
+
+export async function clearThreadGoal(
+  session: AgentPulseSession,
+  threadId: string
+): Promise<boolean> {
+  const response = await authedFetch(`/threads/${encodeURIComponent(threadId)}/goal`, session, {
+    method: 'DELETE'
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, 'Could not clear Codex goal.'));
+  }
+  return ThreadGoalClearResponseSchema.parse(await response.json()).cleared;
 }
 
 export async function transcribeVoiceAudio(

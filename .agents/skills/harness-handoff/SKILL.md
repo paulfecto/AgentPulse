@@ -14,9 +14,11 @@ leaving behind durable state for another operator or agent.
 
 1. Summarize what changed and what did not change.
 2. Record exact verified behavior and the commands or proofs that back it.
-3. List remaining work and open risks without pretending the sprint is done.
-4. Name the exact files and runtime state the next operator must inspect first.
-5. Distinguish durable evidence from disposable artifacts before cleanup.
+3. If Mission Mode is active, state whether `bash scripts/harness/verify_mission.sh` passed, which
+   milestone is next, or which blocker/replan artifact is authoritative.
+4. List remaining work and open risks without pretending the sprint is done.
+5. Name the exact files and runtime state the next operator must inspect first.
+6. Distinguish durable evidence from disposable artifacts before cleanup.
 
 ## Completion evidence
 
@@ -24,6 +26,7 @@ Capture:
 
 - what changed
 - what is verified
+- mission status when `docs/exec-plans/active/mission.json` exists
 - what remains
 - exact files and runtime state
 - which artifacts are durable evidence vs disposable transient output

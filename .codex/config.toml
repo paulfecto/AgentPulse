@@ -44,6 +44,7 @@ Success criteria:
 - When `[engineering_discipline]` is enabled, use `harness-grill-me` for `clarification_mode = "grill-me"`, `harness-clarifier` for bounded fallback mode, feedback-loop-first diagnosis, shared domain language, and vertical TDD slices.
 - When `[ui_reference]` is enabled, use `harness-ui-researcher` before UI creation, critique, redesign, frontend visual polish, onboarding/pricing/dashboard/settings/mobile UI work; Lazyweb availability is warning-only.
 - For complex, risky, ambiguous, or non-trivial work, keep a real active execution plan current.
+- For broad, risky, architectural, release, or project-level work, prepare and obey `docs/exec-plans/active/mission.json`; finish only when mission proof passes or a valid blocker exists.
 
 Constraints:
 - Read `repo_harness.toml [tdd]` before changing enforceable behavior.

@@ -178,5 +178,15 @@
     "line_count": 705,
     "plan": "docs/exec-plans/active/watch-global-runtime.md",
     "reason_code": "deferred-decomposition"
+  },
+  {
+    "classification": "handwritten-source",
+    "content_sha256": "6699a758dacb0212ab5d7f175a2aa3a8c36595b647f86d02cb4f17d4cf7d872c",
+    "content_simhash": "a3530d1bfc531739",
+    "disposition": "deferred-split",
+    "file": "apps/tablet/src/threadRendering.test.ts",
+    "line_count": 759,
+    "plan": "docs/exec-plans/active/upstream-product-sync.md",
+    "reason_code": "deferred-decomposition"
   }
 ]

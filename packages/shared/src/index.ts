@@ -35,6 +35,77 @@ const isoUtcTimestamp = z
 export const ThreadStatusSchema = z.enum(THREAD_STATUSES);
 export const AgentProviderSchema = z.enum(AGENT_PROVIDERS);
 
+export const ThemePreferenceSchema = z.enum(['system', 'light', 'dark']);
+
+export type ThemePreference = z.infer<typeof ThemePreferenceSchema>;
+
+export const CodexThemeVariantSchema = z.enum(['light', 'dark']);
+
+export type CodexThemeVariant = z.infer<typeof CodexThemeVariantSchema>;
+
+const hexColor = z
+  .string()
+  .trim()
+  .regex(/^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$/, {
+    message: 'Color must be a hex value like #3183d8.'
+  })
+  .transform((value) => value.toLowerCase());
+
+export const CodexThemeConfigSchema = z.object({
+  accent: hexColor,
+  contrast: z.number().min(0).max(100).default(50),
+  fonts: z
+    .object({
+      code: z.string().trim().min(1).nullable().optional(),
+      ui: z.string().trim().min(1).nullable().optional()
+    })
+    .default({}),
+  ink: hexColor,
+  opaqueWindows: z.boolean().default(true),
+  semanticColors: z
+    .object({
+      diffAdded: hexColor.optional(),
+      diffRemoved: hexColor.optional(),
+      skill: hexColor.optional()
+    })
+    .default({}),
+  surface: hexColor
+});
+
+export type CodexThemeConfig = z.infer<typeof CodexThemeConfigSchema>;
+
+export const ImportedCodexThemeSchema = z.object({
+  codeThemeId: z.string().trim().min(1).optional(),
+  importedAt: isoUtcTimestamp.optional(),
+  sourceName: z.string().trim().min(1).max(160).optional(),
+  theme: CodexThemeConfigSchema,
+  variant: CodexThemeVariantSchema
+});
+
+export type ImportedCodexTheme = z.infer<typeof ImportedCodexThemeSchema>;
+
+export const CodexThemeSlotsSchema = z.object({
+  light: ImportedCodexThemeSchema.optional(),
+  dark: ImportedCodexThemeSchema.optional()
+});
+
+export const AppearanceSettingsSchema = z.object({
+  codexThemes: CodexThemeSlotsSchema.default({}),
+  themePreference: ThemePreferenceSchema.default('system')
+});
+
+export type AppearanceSettings = z.infer<typeof AppearanceSettingsSchema>;
+
+export const AppearanceSettingsUpdateRequestSchema = z.object({
+  clearVariant: CodexThemeVariantSchema.optional(),
+  codexTheme: ImportedCodexThemeSchema.omit({ importedAt: true }).extend({
+    importedAt: isoUtcTimestamp.optional()
+  }).optional(),
+  themePreference: ThemePreferenceSchema.optional()
+});
+
+export type AppearanceSettingsUpdateRequest = z.infer<typeof AppearanceSettingsUpdateRequestSchema>;
+
 export const ThreadSchema = z.object({
   threadId: z.string().min(1),
   provider: AgentProviderSchema.default('codex'),
@@ -230,6 +301,13 @@ export const PairingDeviceListResponseSchema = z.object({
   devices: z.array(PairingDeviceOptionSchema)
 });
 
+export const PairingPinCreateRequestSchema = z.object({
+  deviceId: z.string().trim().min(1).optional(),
+  deviceName: z.string().trim().min(1).max(80).optional()
+}).refine((value) => !(value.deviceId && value.deviceName), {
+  message: 'Choose a saved device or enter a new device name, not both.'
+});
+
 export const PairResponseSchema = z.object({
   token: z.string().min(16),
   deviceId: z.string().min(1),
@@ -246,15 +324,31 @@ export const PairLookupResponseSchema = z.object({
   helperName: z.string().min(1).optional()
 });
 
+export const PushNotificationPreferencesSchema = z.object({
+  deliveryMode: z.enum(['notifications', 'liveActivity', 'off']).optional(),
+  enabled: z.boolean().default(true),
+  approvals: z.boolean().default(true),
+  completions: z.boolean().default(true),
+  errors: z.boolean().default(true),
+  liveActivities: z.boolean().default(true)
+});
+
 export const WatchPushRegisterRequestSchema = z.object({
   pushToken: z.string().trim().min(8).max(512),
   bundleId: z.string().trim().min(1).max(240).optional(),
-  environment: WatchPushEnvironmentSchema.optional()
+  environment: WatchPushEnvironmentSchema.optional(),
+  preferences: PushNotificationPreferencesSchema.optional()
 });
 
 export const WatchPushRegisterResponseSchema = z.object({
   ok: z.literal(true)
 });
+
+export const PushNotificationPreferencesUpdateRequestSchema = z.object({
+  preferences: PushNotificationPreferencesSchema
+});
+
+export type PushNotificationPreferences = z.infer<typeof PushNotificationPreferencesSchema>;
 
 export const ThreadOpenRequestSchema = z.object({
   threadId: z.string().min(1),
@@ -268,7 +362,10 @@ export const ThreadCreateRequestSchema = z
     projectId: z.string().trim().min(1).optional(),
     cwd: z.string().trim().min(1).optional(),
     modelSlug: z.string().trim().min(1).optional(),
-    reasoningEffort: z.string().trim().min(1).optional()
+    reasoningEffort: z.string().trim().min(1).optional(),
+    permissionMode: z
+      .enum(['default', 'autoReview', 'fullAccess'])
+      .optional()
   })
   .refine((value) => {
     const targetCount = [value.location === 'chat', Boolean(value.projectId), Boolean(value.cwd)]
@@ -286,6 +383,7 @@ export const CHAT_MESSAGE_KINDS = [
   'command',
   'file',
   'tool',
+  'compacted',
   'status'
 ] as const;
 
@@ -300,6 +398,42 @@ export const ChatAttachmentSchema = z.object({
 
 export type ChatAttachment = z.infer<typeof ChatAttachmentSchema>;
 
+export const ThreadFileReferenceKindSchema = z.enum(['markdown', 'code', 'text']);
+
+export const ThreadFileReferenceSourceSchema = z.enum([
+  'codex',
+  'copilot',
+  'claude-code',
+  'file-change'
+]);
+
+export const ThreadFileReferenceSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  displayPath: z.string().min(1),
+  kind: ThreadFileReferenceKindSchema,
+  language: z.string().min(1).optional(),
+  messageId: z.string().min(1).optional(),
+  turnId: z.string().min(1).optional(),
+  source: ThreadFileReferenceSourceSchema
+});
+
+export type ThreadFileReference = z.infer<typeof ThreadFileReferenceSchema>;
+
+export const ThreadFilePreviewMetadataSchema = ThreadFileReferenceSchema.extend({
+  sizeBytes: z.number().int().nonnegative().optional(),
+  modifiedAt: isoUtcTimestamp.optional()
+});
+
+export type ThreadFilePreviewMetadata = z.infer<typeof ThreadFilePreviewMetadataSchema>;
+
+export const ThreadFilePreviewResponseSchema = z.object({
+  metadata: ThreadFilePreviewMetadataSchema,
+  content: z.string()
+});
+
+export type ThreadFilePreviewResponse = z.infer<typeof ThreadFilePreviewResponseSchema>;
+
 export const THREAD_SEND_REASONS = [
   'ready',
   'mobile_send_disabled',
@@ -312,13 +446,22 @@ export const THREAD_SEND_REASONS = [
   'thread_changed'
 ] as const;
 
+export const ThreadPlanItemSchema = z.object({
+  step: z.string().min(1),
+  status: z.enum(['pending', 'in_progress', 'completed'])
+});
+
+export type ThreadPlanItem = z.infer<typeof ThreadPlanItemSchema>;
+
 export const ChatMessageSchema = z.object({
   id: z.string().min(1),
   role: z.enum(CHAT_MESSAGE_ROLES),
   kind: z.enum(CHAT_MESSAGE_KINDS),
   text: z.string(),
   attachments: z.array(ChatAttachmentSchema).optional(),
+  fileReferences: z.array(ThreadFileReferenceSchema).optional(),
   phase: z.string().min(1).optional(),
+  planItems: z.array(ThreadPlanItemSchema).optional(),
   turnId: z.string().min(1).optional(),
   createdAt: isoUtcTimestamp
 });
@@ -328,7 +471,8 @@ export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export const ThreadFileChangeFileSchema = z.object({
   path: z.string().min(1),
   linesAdded: z.number().int().nonnegative(),
-  linesDeleted: z.number().int().nonnegative()
+  linesDeleted: z.number().int().nonnegative(),
+  reference: ThreadFileReferenceSchema.optional()
 });
 
 export type ThreadFileChangeFile = z.infer<typeof ThreadFileChangeFileSchema>;
@@ -376,6 +520,58 @@ export const ThreadUsageSchema = z.object({
 
 export type ThreadUsage = z.infer<typeof ThreadUsageSchema>;
 
+export const THREAD_GOAL_STATUSES = ['active', 'paused', 'budgetLimited', 'complete'] as const;
+
+export const ThreadGoalStatusSchema = z.enum(THREAD_GOAL_STATUSES);
+export type ThreadGoalStatus = z.infer<typeof ThreadGoalStatusSchema>;
+
+export const ThreadGoalSchema = z.object({
+  threadId: z.string().min(1),
+  objective: z.string().min(1),
+  status: ThreadGoalStatusSchema,
+  tokenBudget: z.number().int().positive().nullable(),
+  tokensUsed: z.number().int().nonnegative(),
+  timeUsedSeconds: z.number().int().nonnegative(),
+  createdAt: z.number().int(),
+  updatedAt: z.number().int()
+});
+
+export type ThreadGoal = z.infer<typeof ThreadGoalSchema>;
+
+export const COLLABORATION_MODES = ['default', 'plan'] as const;
+
+export type CollaborationModeKind = (typeof COLLABORATION_MODES)[number];
+
+export const CODEX_PERMISSION_MODES = [
+  'default',
+  'autoReview',
+  'sandbox',
+  'fullAccess',
+  'custom'
+] as const;
+export const SELECTABLE_CODEX_PERMISSION_MODES = [
+  'default',
+  'autoReview',
+  'fullAccess'
+] as const;
+
+export const CodexPermissionModeIdSchema = z.enum(CODEX_PERMISSION_MODES);
+export const SelectableCodexPermissionModeIdSchema = z.enum(SELECTABLE_CODEX_PERMISSION_MODES);
+
+export type CodexPermissionModeId = z.infer<typeof CodexPermissionModeIdSchema>;
+export type SelectableCodexPermissionModeId = z.infer<typeof SelectableCodexPermissionModeIdSchema>;
+
+export const CodexPermissionModeSchema = z.object({
+  mode: CodexPermissionModeIdSchema,
+  label: z.string().min(1),
+  approvalPolicy: z.unknown().optional(),
+  approvalsReviewer: z.unknown().optional(),
+  sandboxMode: z.enum(['read-only', 'workspace-write', 'danger-full-access']).optional(),
+  sandboxPolicy: z.record(z.string(), z.unknown()).optional()
+});
+
+export type CodexPermissionMode = z.infer<typeof CodexPermissionModeSchema>;
+
 export const ThreadTranscriptSchema = z.object({
   threadId: z.string().min(1),
   provider: AgentProviderSchema.default('codex'),
@@ -384,11 +580,14 @@ export const ThreadTranscriptSchema = z.object({
   sendState: ThreadSendStateSchema,
   messages: z.array(ChatMessageSchema),
   usage: ThreadUsageSchema.optional(),
+  goal: ThreadGoalSchema.nullable().optional(),
+  collaborationMode: z.enum(COLLABORATION_MODES).optional(),
   // Current model + reasoning effort recorded for this conversation. Sourced from the
   // thread/resume response so the tablet stays in sync with whatever the desktop changed
   // without us needing to listen for the snapshot broadcast.
   model: z.string().min(1).optional(),
   reasoningEffort: z.string().min(1).optional(),
+  permissionMode: CodexPermissionModeSchema.optional(),
   fileChanges: z.array(ThreadFileChangeSummarySchema).optional()
 });
 
@@ -405,14 +604,11 @@ export const OlderThreadMessagesResponseSchema = z.object({
 
 export type OlderThreadMessagesResponse = z.infer<typeof OlderThreadMessagesResponseSchema>;
 
-export const COLLABORATION_MODES = ['default', 'plan'] as const;
-
-export type CollaborationModeKind = (typeof COLLABORATION_MODES)[number];
-
 export const ThreadMessageRequestSchema = z
   .object({
     text: z.string().trim().max(4000).optional().default(''),
     collaborationMode: z.enum(COLLABORATION_MODES).optional(),
+    permissionMode: SelectableCodexPermissionModeIdSchema.optional(),
     attachments: z.array(ChatAttachmentSchema).max(6).optional()
   })
   .superRefine((payload, context) => {
@@ -435,6 +631,40 @@ export const ThreadMessageResponseSchema = z.object({
 
 export type ThreadMessageResponse = z.input<typeof ThreadMessageResponseSchema>;
 
+export const ThreadGoalUpdateRequestSchema = z
+  .object({
+    objective: z.string().trim().min(1).max(4000).optional(),
+    status: ThreadGoalStatusSchema.optional(),
+    tokenBudget: z.number().int().positive().nullable().optional()
+  })
+  .superRefine((payload, context) => {
+    if (
+      payload.objective ||
+      payload.status ||
+      Object.prototype.hasOwnProperty.call(payload, 'tokenBudget')
+    ) {
+      return;
+    }
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Goal objective, status, or token budget is required.'
+    });
+  });
+
+export type ThreadGoalUpdateRequest = z.infer<typeof ThreadGoalUpdateRequestSchema>;
+
+export const ThreadGoalResponseSchema = z.object({
+  goal: ThreadGoalSchema.nullable()
+});
+
+export type ThreadGoalResponse = z.infer<typeof ThreadGoalResponseSchema>;
+
+export const ThreadGoalClearResponseSchema = z.object({
+  cleared: z.boolean()
+});
+
+export type ThreadGoalClearResponse = z.infer<typeof ThreadGoalClearResponseSchema>;
+
 export const ThreadStopResponseSchema = z.object({
   ok: z.literal(true)
 });
@@ -451,6 +681,11 @@ export const DeviceRevokeRequestSchema = z.object({
   deviceId: z.string().min(1)
 });
 
+export const DeviceRenameRequestSchema = z.object({
+  deviceId: z.string().min(1),
+  deviceName: z.string().trim().min(1).max(80)
+});
+
 export const ThreadListGroupSchema = z.object({
   groupKey: z.string().min(1),
   total: z.number().int().nonnegative(),
@@ -461,7 +696,8 @@ export type ThreadListGroup = z.infer<typeof ThreadListGroupSchema>;
 
 export const ThreadListResponseSchema = z.object({
   threads: z.array(ThreadSchema),
-  groups: z.array(ThreadListGroupSchema).optional()
+  groups: z.array(ThreadListGroupSchema).optional(),
+  hasMore: z.boolean().optional()
 });
 
 export const WatchSummaryThreadSchema = ThreadSchema.pick({
@@ -832,7 +1068,7 @@ export const ThreadModelUpdateResponseSchema = z.object({
 
 // Map of threadId -> "user last reviewed this at" epoch ms. The helper is the
 // source of truth so the seen state is shared across every device paired with
-// the same Mac.
+// the same helper computer.
 export const SeenThreadActivityMapSchema = z.record(
   z.string().min(1),
   z.number().int().nonnegative()
@@ -870,6 +1106,13 @@ export const LiveEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('thread/transcript/changed'),
     payload: ThreadTranscriptSchema
+  }),
+  z.object({
+    type: z.literal('thread/goal/changed'),
+    payload: z.object({
+      threadId: z.string().min(1),
+      goal: ThreadGoalSchema.nullable()
+    })
   }),
   z.object({
     type: z.literal('thread/status/changed'),

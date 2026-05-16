@@ -1,5 +1,9 @@
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { maskToken, type WatchPushEnvironment } from '@agent-pulse/shared';
+import {
+  maskToken,
+  type PushNotificationPreferences,
+  type WatchPushEnvironment
+} from '@agent-pulse/shared';
 
 const DEFAULT_PIN_TTL_MS = 5 * 60 * 1000;
 const GLOBAL_PAIRING_LIMIT_KEY = '__global_pairing_failures__';
@@ -16,6 +20,7 @@ export type DeviceRecord = {
   watchPushBundleId?: string;
   watchPushEnvironment?: WatchPushEnvironment;
   watchPushTokenUpdatedAt?: string;
+  watchPushPreferences?: PushNotificationPreferences;
 };
 
 export type PublicDeviceRecord = Omit<DeviceRecord, 'token'> & {
@@ -48,11 +53,10 @@ export type ValidationResult =
   | { ok: true; device: DeviceRecord }
   | { ok: false; reason: 'missing' | 'unknown-device' | 'invalid' | 'revoked' };
 
-// Don't rewrite a device's keychain entry on every authenticated request just
-// to bump lastSeenAt by a few seconds. The previous behaviour churned the
-// keychain hundreds of times per session, multiplying the chance of a
-// delete-then-readd write losing data. One write per minute per device is
-// plenty for "device is alive" telemetry.
+// Don't rewrite a device's persisted entry on every authenticated request just
+// to bump lastSeenAt by a few seconds. One write per minute per device is
+// plenty for "device is alive" telemetry and avoids excess churn in the
+// platform storage backend.
 const LAST_SEEN_THROTTLE_MS = 60 * 1000;
 
 export class DeviceRegistry {
@@ -131,7 +135,11 @@ export class DeviceRegistry {
   async setWatchPushToken(
     deviceId: string,
     watchPushToken: string | undefined,
-    metadata: { bundleId?: string; environment?: WatchPushEnvironment } = {}
+    options: {
+      bundleId?: string;
+      environment?: WatchPushEnvironment;
+      preferences?: PushNotificationPreferences;
+    } = {}
   ): Promise<DeviceRecord | undefined> {
     const devices = await this.store.list();
     const device = devices.find((candidate) => candidate.deviceId === deviceId);
@@ -143,16 +151,44 @@ export class DeviceRegistry {
     const next: DeviceRecord = { ...device };
     if (watchPushToken && watchPushToken.trim().length > 0) {
       next.watchPushToken = watchPushToken.trim();
-      next.watchPushBundleId = metadata.bundleId?.trim() || undefined;
-      next.watchPushEnvironment = metadata.environment;
       next.watchPushTokenUpdatedAt = this.now().toISOString();
+      const bundleId = options.bundleId?.trim();
+      if (bundleId) {
+        next.watchPushBundleId = bundleId;
+      }
+      if (options.environment) {
+        next.watchPushEnvironment = options.environment;
+      }
+      if (options.preferences) {
+        next.watchPushPreferences = options.preferences;
+      }
     } else {
       delete next.watchPushToken;
       delete next.watchPushBundleId;
       delete next.watchPushEnvironment;
       delete next.watchPushTokenUpdatedAt;
+      delete next.watchPushPreferences;
     }
 
+    await this.store.save(next);
+    return next;
+  }
+
+  async setWatchPushPreferences(
+    deviceId: string,
+    preferences: PushNotificationPreferences
+  ): Promise<DeviceRecord | undefined> {
+    const devices = await this.store.list();
+    const device = devices.find((candidate) => candidate.deviceId === deviceId);
+
+    if (!device || device.revokedAt) {
+      return undefined;
+    }
+
+    const next: DeviceRecord = {
+      ...device,
+      watchPushPreferences: preferences
+    };
     await this.store.save(next);
     return next;
   }
@@ -174,6 +210,22 @@ export class DeviceRegistry {
       ...device,
       revokedAt: this.now().toISOString()
     });
+  }
+
+  async renameDevice(deviceId: string, deviceName: string): Promise<DeviceRecord | undefined> {
+    const devices = await this.store.list();
+    const device = devices.find((candidate) => candidate.deviceId === deviceId);
+
+    if (!device || device.revokedAt) {
+      return undefined;
+    }
+
+    const nextDevice = {
+      ...device,
+      deviceName: deviceName.trim()
+    };
+    await this.store.save(nextDevice);
+    return nextDevice;
   }
 
   async validate(
@@ -225,6 +277,7 @@ type PinRecord = {
   pin: string;
   expiresAt: Date;
   deviceId?: string;
+  deviceName?: string;
 };
 
 const NEW_DEVICE_PIN_SCOPE = '__new-device__';
@@ -274,31 +327,35 @@ export class PairingManager {
     });
   }
 
-  createPin(options: { deviceId?: string } = {}): {
+  createPin(options: { deviceId?: string; deviceName?: string } = {}): {
     pin: string;
     expiresAt: string;
     deviceId?: string;
+    deviceName?: string;
   } {
     this.purgeExpiredPins();
     const raw = Number.parseInt(randomBytes(4).toString('hex'), 16);
     const pin = String(raw % 1_000_000).padStart(6, '0');
     const expiresAt = new Date(this.now().getTime() + this.pinTtlMs);
     const deviceId = options.deviceId?.trim() || undefined;
+    const deviceName = deviceId ? undefined : options.deviceName?.trim() || undefined;
 
-    this.activePins.set(pinScopeKey(deviceId), { pin, expiresAt, deviceId });
+    this.activePins.set(pinScopeKey(deviceId), { pin, expiresAt, deviceId, deviceName });
     return {
       pin,
       expiresAt: expiresAt.toISOString(),
-      ...(deviceId ? { deviceId } : {})
+      ...(deviceId ? { deviceId } : {}),
+      ...(deviceName ? { deviceName } : {})
     };
   }
 
-  listPins(): Array<{ pin: string; expiresAt: string; deviceId?: string }> {
+  listPins(): Array<{ pin: string; expiresAt: string; deviceId?: string; deviceName?: string }> {
     this.purgeExpiredPins();
     return [...this.activePins.values()].map((record) => ({
       pin: record.pin,
       expiresAt: record.expiresAt.toISOString(),
-      ...(record.deviceId ? { deviceId: record.deviceId } : {})
+      ...(record.deviceId ? { deviceId: record.deviceId } : {}),
+      ...(record.deviceName ? { deviceName: record.deviceName } : {})
     }));
   }
 
@@ -359,7 +416,7 @@ export class PairingManager {
 
     const suffix = this.randomId();
     const device = await this.registry.createDevice(
-      input.deviceName?.trim() || `Tablet ${suffix}`,
+      activePin.deviceName?.trim() || input.deviceName?.trim() || `Tablet ${suffix}`,
       input.fingerprint
     );
 

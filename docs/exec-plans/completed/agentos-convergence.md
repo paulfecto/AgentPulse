@@ -3,7 +3,7 @@
 Converge the repository-local AgentOS adapter with the configured upstream
 harness root and confirm the repo has the current shared skill surface enabled.
 
-- status: in-progress
+- status: complete
 - owner: codex
 - started: 2026-05-05
 

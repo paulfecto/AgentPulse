@@ -1,16 +1,20 @@
 import { spawn } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createPrivateKey, randomUUID, sign as signPayload } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import type { IncomingMessage, Server } from 'node:http';
+import { connect, constants as http2Constants } from 'node:http2';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
+import type { Duplex } from 'node:stream';
 import { serve } from '@hono/node-server';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { serveStatic } from '@hono/node-server/serve-static';
 import {
   ApprovalDecisionRequestSchema,
   ApprovalDecisionResponseSchema,
+  AppearanceSettingsSchema,
+  AppearanceSettingsUpdateRequestSchema,
   ApprovalInboxResponseSchema,
   CatalogCommandsResponseSchema,
   CatalogModelSchema,
@@ -18,6 +22,7 @@ import {
   CatalogPluginsResponseSchema,
   CatalogSkillsResponseSchema,
   ChatMessageSchema,
+  DeviceRenameRequestSchema,
   DeviceSessionRecoveryRequestSchema,
   DeviceRevokeRequestSchema,
   HelperHealthSchema,
@@ -31,11 +36,14 @@ import {
   LiveEventSchema,
   PairLookupResponseSchema,
   PairRequestSchema,
+  PairingPinCreateRequestSchema,
   PairingDeviceListResponseSchema,
   PairResponseSchema,
   ProjectFilesResponseSchema,
   ProjectListResponseSchema,
   ProjectSchema,
+  PushNotificationPreferencesSchema,
+  PushNotificationPreferencesUpdateRequestSchema,
   RemoteActivityLogEntrySchema,
   RemoteAccessProtocolSchema,
   RemoteAccessSettingsSchema,
@@ -46,6 +54,9 @@ import {
   ThreadDeleteResponseSchema,
   ThreadFileChangeActionRequestSchema,
   ThreadFileChangeActionResponseSchema,
+  ThreadGoalClearResponseSchema,
+  ThreadGoalResponseSchema,
+  ThreadGoalUpdateRequestSchema,
   ThreadMessageRequestSchema,
   ThreadMessageResponseSchema,
   THREAD_STATUS_PRIORITY,
@@ -68,10 +79,13 @@ import {
   SeenThreadActivityImportRequestSchema,
   SeenThreadActivityMarkRequestSchema,
   SeenThreadActivityResponseSchema,
+  maskToken,
   resolveThreadStatus,
   type CollaborationModeKind,
   type AgentProvider,
+  type AppearanceSettings,
   type ChatAttachment,
+  type SelectableCodexPermissionModeId,
   type ChatMessage,
   type CatalogModel,
   type HelperHealth,
@@ -81,11 +95,13 @@ import {
   type LiveEvent,
   type PendingApprovalRequest,
   type Project,
+  type PushNotificationPreferences,
   type RemoteActivityLogEntry,
   type RemoteAccessSettings,
   type RemoteAccessMode,
   type RemoteAccessProtocol,
   type Thread,
+  type ThreadGoal,
   type ThreadFileChangeSummary,
   type ThreadListGroup,
   type ThreadMessageResponse,
@@ -95,7 +111,7 @@ import {
 import { Hono, type Context } from 'hono';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { AdminAuth } from '../auth/admin';
-import { RateLimiter, type DeviceRegistry, type PairingManager } from '../auth/pairing';
+import { RateLimiter, type DeviceRecord, type DeviceRegistry, type PairingManager } from '../auth/pairing';
 import { isClaudeThreadId } from '../claude/claude-code';
 import { isCopilotThreadId } from '../copilot/copilot';
 import {
@@ -111,6 +127,13 @@ import { registerCodexProjectlessChat } from '../codex/codex-global-state';
 import type { createThreadOpener } from '../codex/thread-opener';
 import type { CodexTranscriptionAuthContext } from '../codex/transcription-auth';
 import { debugLog } from '../debug';
+import {
+  FilePreviewError,
+  decorateTranscriptFileReferences,
+  findThreadFileReference,
+  findThreadFileReferenceCwd,
+  readThreadFilePreview
+} from './file-preview';
 import type { SeenThreadStore } from './seen-thread-store';
 import {
   normalizeProjectsForWorkspaceDisplay,
@@ -118,7 +141,7 @@ import {
   normalizeThreadsForWorkspaceDisplay,
   WorkspaceDisplayRootResolver
 } from './workspace-display';
-import { normalizeEnabledProviders, type HelperSettings, type HelperSettingsStore } from './settings';
+import { normalizeAppearanceSettings, normalizeEnabledProviders, type HelperSettings, type HelperSettingsStore } from './settings';
 import { createTabletDevProxy, type TabletDevProxy } from './tablet-dev-proxy';
 import {
   checkWatchNotificationsConfig,
@@ -141,6 +164,7 @@ const DESKTOP_INTEREST_TTL_MS = 30 * 60_000;
 const MANUAL_OPEN_COOLDOWN_MS = 2_500;
 const AUTO_DESKTOP_REFRESH_SETTLE_MS = 800;
 const AUTO_DESKTOP_REFRESH_COOLDOWN_MS = 10_000;
+const LIST_ENDPOINT_TIMEOUT_MS = 4_000;
 const MAX_THREADS_PER_PROJECT = 6;
 const MAX_EXPANDED_THREADS_PER_PROJECT = 120;
 const MAX_WATCH_SUMMARY_THREADS = 32;
@@ -152,11 +176,38 @@ const WATCH_MESSAGE_MAX_CHARS = 500;
 const CHATGPT_TRANSCRIPTIONS_URL = 'https://chatgpt.com/backend-api/transcribe';
 const OPENAI_TRANSCRIPTIONS_URL = 'https://api.openai.com/v1/audio/transcriptions';
 const DEFAULT_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
+const WATCH_APNS_JWT_TTL_MS = 50 * 60_000;
+const DEFAULT_WATCH_APNS_TOPIC = 'com.developingadventures.agentpulse';
+const DEFAULT_WATCH_APNS_ENVIRONMENT: WatchApnsEnvironment = 'sandbox';
+
+type WatchPushNotification = {
+  threadId: string;
+  kind: 'finished' | 'errored' | 'attention';
+  title: string;
+  body: string;
+  category?: 'AGENT_PULSE_THREAD' | 'AGENT_PULSE_THREAD_APPROVAL';
+  approvalType?: string;
+};
+
+export type WatchPushDelivery = {
+  send(device: DeviceRecord, notification: WatchPushNotification): Promise<void>;
+};
+
+type WatchApnsEnvironment = 'sandbox' | 'production';
+
+type WatchApnsConfig = {
+  teamId: string;
+  keyId: string;
+  privateKeyPem: string;
+  topic: string;
+  environment: WatchApnsEnvironment;
+};
 
 type MessageSendOptions = {
   model?: string;
   effort?: string;
   collaborationMode?: CollaborationModeKind;
+  permissionMode?: SelectableCodexPermissionModeId;
   attachments?: ChatAttachment[];
 };
 
@@ -197,10 +248,20 @@ export type AppServerChatBridge = {
   ): Promise<ThreadMessageResponse>;
   startThread?(
     cwd: string,
-    options?: { model?: string; reasoningEffort?: string }
+    options?: {
+      model?: string;
+      reasoningEffort?: string;
+      permissionMode?: SelectableCodexPermissionModeId;
+    }
   ): Promise<Thread>;
   interruptTurn?(threadId: string): Promise<void>;
   compactThread?(threadId: string): Promise<void>;
+  readGoal?(threadId: string): Promise<ThreadGoal | null>;
+  setGoal?(
+    threadId: string,
+    input: { objective?: string; status?: ThreadGoal['status']; tokenBudget?: number | null }
+  ): Promise<ThreadGoal>;
+  clearGoal?(threadId: string): Promise<boolean>;
   archiveThread?(threadId: string): Promise<void>;
   startReview?(threadId: string): Promise<void>;
   respondToApproval?(
@@ -266,6 +327,9 @@ export type CodexMirrorBridge = {
   // `waiting_approval` (e.g. a resolution notification was missed during a
   // brief disconnect). Returns true when at least one entry was removed.
   clearPendingApprovalsForThread?(threadId: string): boolean;
+  onStreamingChange?(
+    listener: (event: { threadId: string; isStreaming: boolean }) => void
+  ): () => void;
   onPendingApprovalsChange?(
     listener: (event: { threadId: string; requests: PendingApprovalRequest[] }) => void
   ): () => void;
@@ -340,6 +404,7 @@ export type AgentPulseServerOptions = {
     failed: number;
     error?: string;
   }>;
+  watchPushDelivery?: WatchPushDelivery;
 };
 
 export type RemoteAccessController = {
@@ -416,6 +481,259 @@ export async function startAgentPulseServer(
   };
 }
 
+function createWatchApnsDelivery(): WatchPushDelivery {
+  let cachedPrivateKeyPem: string | undefined;
+  let privateKeyLoadPromise: Promise<string | undefined> | undefined;
+  let cachedJwt:
+    | {
+        token: string;
+        expiresAt: number;
+        teamId: string;
+        keyId: string;
+        keyFingerprint: string;
+      }
+    | undefined;
+
+  const loadPrivateKeyPem = async (): Promise<string | undefined> => {
+    if (cachedPrivateKeyPem) {
+      return cachedPrivateKeyPem;
+    }
+    if (!privateKeyLoadPromise) {
+      privateKeyLoadPromise = (async () => {
+        const inlineKey = process.env.AGENT_PULSE_WATCH_APNS_PRIVATE_KEY?.trim();
+        if (inlineKey) {
+          cachedPrivateKeyPem = inlineKey.replace(/\\n/g, '\n');
+          return cachedPrivateKeyPem;
+        }
+
+        const privateKeyPath = process.env.AGENT_PULSE_WATCH_APNS_PRIVATE_KEY_PATH?.trim();
+        if (!privateKeyPath) {
+          return undefined;
+        }
+
+        try {
+          cachedPrivateKeyPem = await readFile(privateKeyPath, 'utf8');
+          return cachedPrivateKeyPem;
+        } catch {
+          return undefined;
+        }
+      })();
+    }
+    return privateKeyLoadPromise;
+  };
+
+  const authorizationFor = async (config: WatchApnsConfig): Promise<string> => {
+    const keyFingerprint = createHash('sha256').update(config.privateKeyPem).digest('hex');
+    if (
+      cachedJwt &&
+      cachedJwt.expiresAt > Date.now() &&
+      cachedJwt.teamId === config.teamId &&
+      cachedJwt.keyId === config.keyId &&
+      cachedJwt.keyFingerprint === keyFingerprint
+    ) {
+      return `bearer ${cachedJwt.token}`;
+    }
+
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const encodedHeader = base64urlEncode(JSON.stringify({ alg: 'ES256', kid: config.keyId }));
+    const encodedPayload = base64urlEncode(JSON.stringify({ iss: config.teamId, iat: issuedAt }));
+    const signingInput = `${encodedHeader}.${encodedPayload}`;
+    const signature = signPayload('sha256', Buffer.from(signingInput), {
+      key: createPrivateKey(config.privateKeyPem),
+      dsaEncoding: 'ieee-p1363'
+    });
+    const token = `${signingInput}.${base64urlEncode(signature)}`;
+    cachedJwt = {
+      token,
+      expiresAt: Date.now() + WATCH_APNS_JWT_TTL_MS,
+      teamId: config.teamId,
+      keyId: config.keyId,
+      keyFingerprint
+    };
+    return `bearer ${token}`;
+  };
+
+  return {
+    async send(device, notification) {
+      const config = await resolveWatchApnsConfig(device, loadPrivateKeyPem);
+      if (!config) {
+        // eslint-disable-next-line no-console
+        console.info('[watch-push]', {
+          deviceId: device.deviceId,
+          kind: notification.kind,
+          threadId: notification.threadId,
+          delivered: false,
+          reason: 'apns-not-configured'
+        });
+        return;
+      }
+
+      const authorization = await authorizationFor(config);
+      await sendWatchApnsNotification(config, authorization, device, notification);
+    }
+  };
+}
+
+async function resolveWatchApnsConfig(
+  device: DeviceRecord,
+  loadPrivateKeyPem: () => Promise<string | undefined>
+): Promise<WatchApnsConfig | undefined> {
+  const teamId = process.env.AGENT_PULSE_WATCH_APNS_TEAM_ID?.trim();
+  const keyId = process.env.AGENT_PULSE_WATCH_APNS_KEY_ID?.trim();
+  const topic =
+    process.env.AGENT_PULSE_WATCH_APNS_TOPIC?.trim() ||
+    device.watchPushBundleId?.trim() ||
+    DEFAULT_WATCH_APNS_TOPIC;
+  const environment =
+    normalizeWatchApnsEnvironment(process.env.AGENT_PULSE_WATCH_APNS_ENVIRONMENT) ||
+    device.watchPushEnvironment ||
+    DEFAULT_WATCH_APNS_ENVIRONMENT;
+
+  if (!teamId || !keyId || !topic || !environment) {
+    return undefined;
+  }
+
+  const privateKeyPem = await loadPrivateKeyPem();
+  if (!privateKeyPem) {
+    return undefined;
+  }
+
+  return {
+    teamId,
+    keyId,
+    privateKeyPem,
+    topic,
+    environment
+  };
+}
+
+function normalizeWatchApnsEnvironment(value: string | undefined): WatchApnsEnvironment | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'sandbox' || normalized === 'development') {
+    return 'sandbox';
+  }
+  if (normalized === 'production' || normalized === 'prod') {
+    return 'production';
+  }
+  return undefined;
+}
+
+async function sendWatchApnsNotification(
+  config: WatchApnsConfig,
+  authorization: string,
+  device: DeviceRecord,
+  notification: WatchPushNotification
+): Promise<void> {
+  const token = device.watchPushToken?.trim();
+  if (!token) {
+    return;
+  }
+
+  const authority =
+    config.environment === 'production'
+      ? 'https://api.push.apple.com'
+      : 'https://api.sandbox.push.apple.com';
+  const collapseId = createHash('sha1')
+    .update(`${notification.kind}:${notification.threadId}`)
+    .digest('hex');
+  const payload = JSON.stringify({
+    aps: {
+      alert: {
+        title: notification.title,
+        body: notification.body
+      },
+      sound: 'default',
+      category: notification.category ?? 'AGENT_PULSE_THREAD',
+      'thread-id': notification.threadId
+    },
+    threadId: notification.threadId,
+    deviceId: device.deviceId,
+    kind: notification.kind,
+    ...(notification.approvalType ? { approvalType: notification.approvalType } : {})
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    const client = connect(authority);
+    let settled = false;
+    let responseBody = '';
+    let statusCode = 0;
+
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      client.close();
+      callback();
+    };
+
+    client.once('error', (error) => {
+      finish(() => reject(error));
+    });
+
+    const request = client.request({
+      [http2Constants.HTTP2_HEADER_METHOD]: 'POST',
+      [http2Constants.HTTP2_HEADER_PATH]: `/3/device/${token}`,
+      authorization,
+      'apns-topic': config.topic,
+      'apns-push-type': 'alert',
+      'apns-priority': '10',
+      'apns-collapse-id': collapseId,
+      'content-type': 'application/json'
+    });
+
+    request.setEncoding('utf8');
+    request.on('response', (headers) => {
+      statusCode = Number(headers[http2Constants.HTTP2_HEADER_STATUS] ?? 0);
+    });
+    request.on('data', (chunk: string) => {
+      responseBody += chunk;
+    });
+    request.on('error', (error) => {
+      finish(() => reject(error));
+    });
+    request.on('end', () => {
+      finish(() => {
+        if (statusCode >= 200 && statusCode < 300) {
+          resolve();
+          return;
+        }
+
+        const reason = parseWatchApnsFailureReason(responseBody);
+        reject(
+          new Error(
+            reason
+              ? `APNs rejected the notification (${statusCode}: ${reason}).`
+              : `APNs rejected the notification (${statusCode}).`
+          )
+        );
+      });
+    });
+    request.end(payload);
+  });
+}
+
+function parseWatchApnsFailureReason(body: string): string | undefined {
+  const trimmed = body.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as { reason?: string };
+    return parsed.reason ?? trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
+function base64urlEncode(value: string | Buffer): string {
+  return Buffer.from(value).toString('base64url');
+}
+
 type CreatedApp = {
   app: Hono;
   transformTranscript: (transcript: ThreadTranscript, threadId: string) => ThreadTranscript;
@@ -430,6 +748,7 @@ function createApp(
 ): CreatedApp {
   const app = new Hono();
   const desktopControlDisabled = options.desktopControlDisabled === true;
+  const watchPushDelivery = options.watchPushDelivery ?? createWatchApnsDelivery();
   const startedAt = Date.now();
   const localAttachments = new Map<string, LocalAttachment>();
   // Tracks the last status we observed per thread so the watch-push hook only
@@ -442,16 +761,19 @@ function createApp(
   // is consumed when the user sends the next
   // message — at that point we pass it directly to turn/start, no ownership needed.
   const pendingModelOverrides = new Map<string, { model: string; effort?: string }>();
-  // Last-known-good transcript per thread, updated whenever any path successfully reads
-  // one (HTTP fetch, poller broadcast). Used as a fallback when `appServer.readTranscript`
-  // is slow or upstream Codex is degraded — we'd rather return slightly stale data fast
-  // than block long enough for the cloudflared tunnel to cancel the request.
+  // Last-known-good transcript per thread. Live WebSocket events use this only as
+  // a base for app-server live overlays; HTTP transcript reads must still come
+  // from Codex directly so the mobile app never accepts stale data as current.
   const transcriptCache = new Map<string, ThreadTranscript>();
   const handoffPackages = new Map<string, HandoffPackage>();
+  let lastThreadListResult: ThreadListResult | undefined;
+  let threadListEndpointInFlight: Promise<ThreadListResult> | undefined;
+  let lastProjectList: Project[] | undefined;
+  let projectListEndpointInFlight: Promise<Project[]> | undefined;
   // Maps threadId → workspace path on disk. Populated whenever we list threads or start
   // a new one, then read by `transformTranscript` to resolve agent-emitted relative
-  // image paths (e.g. `![logo](assets/foo.svg)`) to tokenized `/attachments/...` URLs
-  // the browser can actually load.
+  // file and image paths (e.g. `docs/PLAN.md` or `![logo](assets/foo.svg)`) into
+  // previewable mobile/tablet references.
   const threadCwdByThreadId = new Map<string, string>();
   const liveSubscribedThreadIds = new Set<string>();
   // Codex's desktop "New chat" is a draft until the first user message. `thread/start`
@@ -524,13 +846,48 @@ function createApp(
   const requestIp = (context: Context): string =>
     clientIp(context.req.raw, getConnInfo(context).remote.address, currentSettings);
 
-  const notifyWatchDevices = (input: WatchNotificationInput): void => {
+  const pushPreferencesForDevice = (device: DeviceRecord): PushNotificationPreferences =>
+    PushNotificationPreferencesSchema.parse(device.watchPushPreferences ?? {});
+  const deviceAllowsPushNotification = (
+    device: DeviceRecord,
+    notification: WatchPushNotification
+  ): boolean => {
+    const preferences = pushPreferencesForDevice(device);
+    if (preferences.deliveryMode === 'off' || preferences.deliveryMode === 'liveActivity') {
+      return false;
+    }
+    if (!preferences.enabled) {
+      return false;
+    }
+    if (notification.kind === 'finished') {
+      return preferences.completions;
+    }
+    if (notification.kind === 'errored') {
+      return preferences.errors;
+    }
+    return preferences.approvals;
+  };
+
+  const notifyWatchDevices = (input: WatchPushNotification | WatchNotificationInput): void => {
     void (async () => {
+      const notification: WatchNotificationInput = {
+        serverName: 'Agent Pulse',
+        ...input
+      };
+      const devices = (await options.registry.listDevicesWithWatchPush()).filter((device) =>
+        deviceAllowsPushNotification(device, notification)
+      );
+      if (devices.length === 0) return;
+
+      if (options.watchPushDelivery) {
+        await Promise.allSettled(
+          devices.map((device) => watchPushDelivery.send(device, notification))
+        );
+        return;
+      }
+
       const settings = watchNotificationsSettings();
       if (!settings.enabled) return;
-
-      const devices = await options.registry.listDevicesWithWatchPush();
-      if (devices.length === 0) return;
 
       const result = await (options.watchPushSender ?? deliverWatchNotifications)({
         settings,
@@ -540,7 +897,7 @@ function createApp(
           bundleId: device.watchPushBundleId,
           environment: device.watchPushEnvironment
         })),
-        notification: input
+        notification
       });
       await saveWatchNotificationsSettings({
         ...settings,
@@ -555,19 +912,57 @@ function createApp(
     });
   };
 
-  const maybeNotifyWatchOfStatusChange = (threadId: string, nextStatus: Thread['status']): void => {
+  const notificationTranscriptForThread = async (
+    threadId: string,
+    provider: AgentProvider
+  ): Promise<ThreadTranscript | undefined> => {
+    const transcript =
+      provider === 'claude-code'
+        ? await options.claudeCode?.readTranscript(threadId).catch(() => undefined)
+        : provider === 'copilot'
+          ? await options.copilot?.readTranscript(threadId).catch(() => undefined)
+          : await options.appServer?.readTranscript(threadId).catch(() => undefined);
+    return transcript ? transformTranscript(transcript, threadId) : transcriptCache.get(threadId);
+  };
+
+  const watchFinishedNotification = async (
+    threadId: string
+  ): Promise<WatchPushNotification | undefined> => {
+    const thread = (await listAllThreads().catch(() => ({ threads: [] as Thread[] }))).threads
+      .find((candidate) => candidate.threadId === threadId);
+    const provider = thread ? providerForMemoryThread(thread) : providerForThreadId(threadId);
+    const providerName = displayNameForProvider(provider);
+    const transcript = await notificationTranscriptForThread(threadId, provider);
+    return buildWatchFinishedNotification(threadId, providerName, thread, transcript);
+  };
+
+  const maybeNotifyWatchOfStatusChange = (
+    threadId: string,
+    nextStatus: Thread['status'],
+    options: { notifyInitial?: boolean } = {}
+  ): void => {
+    const notifyInitial = options.notifyInitial ?? true;
     const previous = lastStatusByThread.get(threadId);
     lastStatusByThread.set(threadId, nextStatus);
     if (previous === nextStatus) return;
+    if (!notifyInitial && previous === undefined) return;
 
     if (nextStatus === 'idle' && (previous === 'running' || previous === 'compacting')) {
-      notifyWatchDevices({
-        threadId,
-        kind: 'finished',
-        serverName: 'Agent Pulse',
-        title: 'Agent finished',
-        body: 'Open Agent Pulse to review the result.'
-      });
+      void watchFinishedNotification(threadId)
+        .then((notification) => {
+          if (notification) {
+            notifyWatchDevices(notification);
+          }
+        })
+        .catch(() =>
+          notifyWatchDevices({
+            threadId,
+            kind: 'finished',
+            serverName: 'Agent Pulse',
+            title: 'Agent stopped',
+            body: 'Review the result on your watch.'
+          })
+        );
       return;
     }
     if (nextStatus === 'error') {
@@ -581,23 +976,41 @@ function createApp(
       return;
     }
     if (nextStatus === 'waiting_approval') {
+      const approvalSummary = watchApprovalNotificationSummary(pendingRequestsForThread(threadId));
       notifyWatchDevices({
         threadId,
         kind: 'attention',
         serverName: 'Agent Pulse',
-        title: 'Agent needs you',
-        body: 'A pending approval is waiting.'
+        title: approvalSummary.title,
+        body: approvalSummary.body,
+        category: 'AGENT_PULSE_THREAD_APPROVAL',
+        approvalType: approvalSummary.approvalType
       });
     }
   };
 
-  // Intercept every status broadcast once so the watch-push hook fires
-  // automatically without sprinkling calls at every emit site. The original
-  // method is kept so non-status events pass through unchanged.
+  const maybeNotifyWatchOfStreamingChange = (threadId: string, isStreaming: boolean): void => {
+    if (isStreaming) {
+      maybeNotifyWatchOfStatusChange(threadId, 'running');
+    }
+  };
+
+  // Intercept status broadcasts once so the watch/phone push hook fires from
+  // meaningful thread state: active->idle completion, approval/user attention,
+  // and errors. Streaming changes still mark a thread as running, but
+  // streaming=false is too noisy to mean "finished" by itself.
   const originalBroadcast = hub.broadcast.bind(hub);
   hub.broadcast = (event: LiveEvent): void => {
+    if (event.type === 'thread/upsert') {
+      maybeNotifyWatchOfStatusChange(event.payload.threadId, event.payload.status, {
+        notifyInitial: false
+      });
+    }
     if (event.type === 'thread/status/changed') {
       maybeNotifyWatchOfStatusChange(event.payload.threadId, event.payload.status);
+    }
+    if (event.type === 'thread/streaming-changed') {
+      maybeNotifyWatchOfStreamingChange(event.payload.threadId, event.payload.isStreaming);
     }
     originalBroadcast(event);
   };
@@ -921,9 +1334,10 @@ function createApp(
   };
   const workspaceDisplayRoots = new WorkspaceDisplayRootResolver();
   const listAllThreads = async (
-    groupLimits: Map<string, number> = new Map()
+    groupLimits: Map<string, number> = new Map(),
+    defaultLimit = MAX_THREADS_PER_PROJECT
   ): Promise<ThreadListResult> => {
-    const providerListOptions = providerThreadListOptions(groupLimits);
+    const providerListOptions = providerThreadListOptions(groupLimits, defaultLimit);
     const [codexThreads, claudeThreads, copilotThreads] = await Promise.all([
       isProviderEnabled('codex') ? listCodexThreads(providerListOptions) : Promise.resolve([]),
       isProviderEnabled('claude-code')
@@ -948,7 +1362,7 @@ function createApp(
     );
     return limitThreadsPerProject(
       displayThreads,
-      MAX_THREADS_PER_PROJECT,
+      defaultLimit,
       groupLimits
     );
   };
@@ -969,6 +1383,69 @@ function createApp(
         options.chatRoot
       )
     );
+  };
+  const overlayLiveStatus = (thread: Thread): Thread => {
+    const provider = providerForThreadId(thread.threadId);
+    if (provider === 'claude-code') {
+      if (options.claudeCode?.isThreadWaitingForApproval?.(thread.threadId)) {
+        return ThreadSchema.parse({ ...thread, status: 'waiting_approval' });
+      }
+      if (options.claudeCode?.isThreadStreaming?.(thread.threadId)) {
+        return ThreadSchema.parse({ ...thread, status: 'running' });
+      }
+      return thread;
+    }
+    if (provider === 'copilot') {
+      if (options.copilot?.isThreadWaitingForApproval?.(thread.threadId)) {
+        return ThreadSchema.parse({ ...thread, status: 'waiting_approval' });
+      }
+      if (options.copilot?.isThreadStreaming?.(thread.threadId)) {
+        return ThreadSchema.parse({ ...thread, status: 'running' });
+      }
+      return thread;
+    }
+    return applyAppServerLiveThreadStatus(thread, options.appServer, options.mirror);
+  };
+  const overlayLiveStatusOnResult = (base: ThreadListResult): ThreadListResult => ({
+    ...base,
+    threads: base.threads.map(overlayLiveStatus)
+  });
+  const listThreadsForEndpoint = async (
+    groupLimits: Map<string, number>,
+    defaultLimit: number
+  ): Promise<ThreadListResult> => {
+    if (!threadListEndpointInFlight) {
+      threadListEndpointInFlight = listAllThreads(groupLimits, defaultLimit)
+        .then((result) => {
+          lastThreadListResult = result;
+          return result;
+        })
+        .finally(() => {
+          threadListEndpointInFlight = undefined;
+        });
+    }
+    const result = await settleWithin(threadListEndpointInFlight, LIST_ENDPOINT_TIMEOUT_MS);
+    const base = result.ok
+      ? result.value
+      : lastThreadListResult ?? { threads: [], groups: [] };
+    return overlayLiveStatusOnResult(base);
+  };
+  const listProjectsForEndpoint = async (): Promise<Project[]> => {
+    if (!projectListEndpointInFlight) {
+      projectListEndpointInFlight = listAllProjects()
+        .then((projects) => {
+          lastProjectList = projects;
+          return projects;
+        })
+        .finally(() => {
+          projectListEndpointInFlight = undefined;
+        });
+    }
+    const result = await settleWithin(projectListEndpointInFlight, LIST_ENDPOINT_TIMEOUT_MS);
+    if (result.ok) {
+      return result.value;
+    }
+    return lastProjectList ?? [];
   };
   const broadcastFreshTranscript = async (threadId: string): Promise<void> => {
     if (!options.appServer?.readTranscript) {
@@ -1008,6 +1485,19 @@ function createApp(
     const liveTranscript = await options.appServer?.readTranscript?.(threadId)
       .catch(() => undefined);
     return liveTranscript ?? transcriptCache.get(threadId);
+  };
+  const ensureThreadCwd = async (threadId: string): Promise<string | undefined> => {
+    const existing = threadCwdByThreadId.get(threadId);
+    if (existing) {
+      return existing;
+    }
+    const result = await listAllThreads().catch(() => undefined);
+    const thread = result?.threads.find((candidate) => candidate.threadId === threadId);
+    if (thread?.workspacePath) {
+      threadCwdByThreadId.set(threadId, thread.workspacePath);
+      return thread.workspacePath;
+    }
+    return threadCwdByThreadId.get(threadId);
   };
 
   const startHandoffTargetThread = async (
@@ -1100,6 +1590,13 @@ function createApp(
     return visibleTranscript;
   };
 
+  const codexPendingRequestsForThread = (threadId: string): PendingApprovalRequest[] => {
+    if (!options.mirror?.isConnected() || !options.mirror.isThreadWaitingForApproval?.(threadId)) {
+      return [];
+    }
+    return options.mirror.getPendingApprovalRequests?.(threadId) ?? [];
+  };
+
   const pendingRequestsForThread = (threadId: string): PendingApprovalRequest[] => {
     if (isClaudeThreadId(threadId)) {
       return options.claudeCode?.getPendingApprovalRequests?.(threadId) ?? [];
@@ -1107,10 +1604,7 @@ function createApp(
     if (isCopilotThreadId(threadId)) {
       return options.copilot?.getPendingApprovalRequests?.(threadId) ?? [];
     }
-    return mergePendingApprovalRequests(
-      options.appServer?.getPendingApprovalRequests?.(threadId) ?? [],
-      options.mirror?.getPendingApprovalRequests?.(threadId) ?? []
-    );
+    return codexPendingRequestsForThread(threadId);
   };
 
   app.use('*', async (context, next) => {
@@ -1284,7 +1778,17 @@ function createApp(
   });
 
   app.post('/device/session/recover', async (context) => {
-    const parsed = DeviceSessionRecoveryRequestSchema.parse(await context.req.json());
+    const body = await readJsonBody(context);
+    if (!body.ok) {
+      return context.json({ error: body.error }, 400);
+    }
+
+    const recoveryRequest = DeviceSessionRecoveryRequestSchema.safeParse(body.value);
+    if (!recoveryRequest.success) {
+      return context.json({ error: 'invalid' }, 401);
+    }
+
+    const parsed = recoveryRequest.data;
     const device = await options.registry.recoverDeviceSession(parsed.deviceId, parsed.fingerprint);
 
     if (!device) {
@@ -1383,6 +1887,7 @@ function createApp(
     const remoteAccess = options.remoteAccess?.getStatus() ?? currentSettings.remoteAccess;
     currentSettings = {
       ...currentSettings,
+      appearance: normalizeAppearanceSettings(currentSettings.appearance),
       remoteAccess,
       watchNotifications: watchNotificationsSettings()
     };
@@ -1475,10 +1980,14 @@ function createApp(
       return adminForbidden(context);
     }
 
-    const body = (await context.req.json().catch(() => ({}))) as { deviceId?: string };
-    const deviceId = typeof body.deviceId === 'string' ? body.deviceId : undefined;
+    const body = PairingPinCreateRequestSchema.parse(await context.req.json().catch(() => ({})));
 
-    return context.json(options.pairing.createPin({ deviceId }));
+    return context.json(
+      options.pairing.createPin({
+        deviceId: body.deviceId,
+        deviceName: body.deviceName
+      })
+    );
   });
 
   app.post('/settings/lan', async (context) => {
@@ -1573,6 +2082,43 @@ function createApp(
     return context.json({ ok: true, settings: nextSettings });
   });
 
+  app.post('/settings/appearance', async (context) => {
+    if (!isAdminRequest(context.req.raw, options.adminAuth)) {
+      return adminForbidden(context);
+    }
+
+    const parsed = AppearanceSettingsUpdateRequestSchema.parse(
+      await context.req.json().catch(() => ({}))
+    );
+    const currentAppearance = normalizeAppearanceSettings(currentSettings.appearance);
+    const codexThemes: AppearanceSettings['codexThemes'] = {
+      ...currentAppearance.codexThemes
+    };
+
+    if (parsed.clearVariant) {
+      delete codexThemes[parsed.clearVariant];
+    }
+    if (parsed.codexTheme) {
+      codexThemes[parsed.codexTheme.variant] = {
+        ...parsed.codexTheme,
+        importedAt: parsed.codexTheme.importedAt ?? new Date().toISOString()
+      };
+    }
+
+    const appearance = AppearanceSettingsSchema.parse({
+      ...currentAppearance,
+      ...(parsed.themePreference ? { themePreference: parsed.themePreference } : {}),
+      codexThemes
+    });
+    const nextSettings: HelperSettings = {
+      ...currentSettings,
+      appearance
+    };
+    currentSettings = nextSettings;
+    await options.settingsStore.save(nextSettings);
+    return context.json({ ok: true, appearance });
+  });
+
   app.post('/settings/device/revoke', async (context) => {
     if (!isAdminRequest(context.req.raw, options.adminAuth)) {
       return adminForbidden(context);
@@ -1590,16 +2136,51 @@ function createApp(
     return context.json({ ok: true });
   });
 
+  app.post('/settings/device/rename', async (context) => {
+    if (!isAdminRequest(context.req.raw, options.adminAuth)) {
+      return adminForbidden(context);
+    }
+
+    const parsed = DeviceRenameRequestSchema.parse(await context.req.json());
+    const device = await options.registry.renameDevice(parsed.deviceId, parsed.deviceName);
+    if (!device) {
+      return context.json({ error: 'Device is not available anymore.' }, 404);
+    }
+
+    const { token, ...publicDevice } = device;
+    return context.json({
+      ok: true,
+      device: {
+        ...publicDevice,
+        tokenPreview: maskToken(token)
+      }
+    });
+  });
+
   app.get('/threads/list', async (context) => {
     const auth = await authenticate(context);
     if (!auth.ok) {
       return context.json({ error: auth.reason }, auth.reason === 'revoked' ? 403 : 401);
     }
 
-    const { threads, groups } = await listAllThreads(parseThreadListGroupLimits(context));
+    const requestedLimit = parseThreadListLimit(context.req.query('limit'));
+    const defaultLimit = requestedLimit
+      ? Math.min(MAX_EXPANDED_THREADS_PER_PROJECT, requestedLimit + 1)
+      : MAX_THREADS_PER_PROJECT;
+    const { threads: listedThreads, groups } = await listThreadsForEndpoint(
+      parseThreadListGroupLimits(context),
+      defaultLimit
+    );
+    let threads = listedThreads;
+    let hasMore = groups.length > 0;
+    if (requestedLimit && listedThreads.length > requestedLimit) {
+      threads = sortThreadsByActivity(listedThreads).slice(0, requestedLimit);
+      hasMore = true;
+    }
     return context.json(ThreadListResponseSchema.parse({
       threads,
-      ...(groups.length > 0 ? { groups } : {})
+      ...(groups.length > 0 ? { groups } : {}),
+      ...(hasMore ? { hasMore } : {})
     }));
   });
 
@@ -1681,7 +2262,7 @@ function createApp(
     }
 
     return context.json(ProjectListResponseSchema.parse({
-      projects: await listAllProjects()
+      projects: await listProjectsForEndpoint()
     }));
   });
 
@@ -1825,7 +2406,10 @@ function createApp(
             : options.appServer!;
       const rawThread = await starter.startThread!(cwd, {
         ...(parsed.modelSlug ? { model: parsed.modelSlug } : {}),
-        ...(parsed.reasoningEffort ? { reasoningEffort: parsed.reasoningEffort } : {})
+        ...(parsed.reasoningEffort ? { reasoningEffort: parsed.reasoningEffort } : {}),
+        ...(parsed.provider === 'codex' && parsed.permissionMode
+          ? { permissionMode: parsed.permissionMode }
+          : {})
       });
       const thread = isSharedChat
         ? decorateSharedChatThread({ ...rawThread, workspacePath: rawThread.workspacePath ?? cwd }, options.chatRoot)
@@ -2041,7 +2625,7 @@ function createApp(
     }
     if (!voiceTranscriptionAvailable(options)) {
       return context.json(
-        { error: 'Codex voice transcription is unavailable. Open Codex on your Mac first.' },
+        { error: 'Codex voice transcription is unavailable. Open Codex on the helper computer first.' },
         503
       );
     }
@@ -2050,7 +2634,7 @@ function createApp(
       const authProviders = voiceTranscriptionAuthProviders(options);
       if (authProviders.length === 0) {
         return context.json(
-          { error: 'Codex voice transcription is unavailable. Open Codex on your Mac first.' },
+          { error: 'Codex voice transcription is unavailable. Open Codex on the helper computer first.' },
           503
         );
       }
@@ -2078,6 +2662,7 @@ function createApp(
     if (!isProviderEnabled(providerForThreadId(threadId))) {
       return disabledProviderResponse(context, providerForThreadId(threadId));
     }
+    await ensureThreadCwd(threadId);
     if (isClaudeThreadId(threadId)) {
       if (!options.claudeCode) {
         return context.json({ error: 'Claude Code connection unavailable.' }, 503);
@@ -2089,7 +2674,8 @@ function createApp(
             limitTranscriptMessages(transcript, messageLimit),
             threadId
           ),
-          transcriptView
+          transcriptView,
+          messageLimit
         );
         return context.json(
           ThreadTranscriptSchema.parse(visibleTranscript)
@@ -2110,7 +2696,8 @@ function createApp(
             limitTranscriptMessages(transcript, messageLimit),
             threadId
           ),
-          transcriptView
+          transcriptView,
+          messageLimit
         );
         return context.json(
           ThreadTranscriptSchema.parse(visibleTranscript)
@@ -2127,11 +2714,6 @@ function createApp(
 
     await settleWithin(ensureAppServerLiveSubscription(threadId), 750);
 
-    // Race the live transcript read against a short timeout. When Codex's app-server is
-    // healthy this resolves in milliseconds; when it's degraded (mcp transport flapping,
-    // chatgpt.com 503ing) it can hang for tens of seconds. Rather than block long enough
-    // for cloudflared to cancel the stream, fall back to the last-known-good transcript
-    // cached either by an earlier successful fetch or the background poller.
     const TRANSCRIPT_READ_TIMEOUT_MS = 5_000;
     const liveResult = await settleWithin(
       options.appServer.readTranscript(threadId).catch(() => undefined),
@@ -2139,12 +2721,8 @@ function createApp(
     );
 
     let transcript: ThreadTranscript | undefined;
-    let stale = false;
     if (liveResult.ok && liveResult.value) {
       transcript = liveResult.value;
-    } else {
-      transcript = transcriptCache.get(threadId);
-      stale = true;
     }
 
     if (!transcript) {
@@ -2160,17 +2738,13 @@ function createApp(
         ? await options.usageProvider(threadId).catch(() => undefined)
         : undefined;
       hub.broadcast({ type: 'health/changed', payload: healthPayload(options, startedAt) });
-      if (stale) {
-        // Hint to the client that the body is from cache. Headers stay out of the zod
-        // schema so we don't have to thread a flag through every transcript shape.
-        context.header('X-Transcript-Stale', '1');
-      }
       const visibleTranscript = presentTranscriptForView(
         transformTranscript(
           limitTranscriptMessages(transcript, messageLimit),
           threadId
         ),
-        transcriptView
+        transcriptView,
+        messageLimit
       );
       const parsedTranscript = ThreadTranscriptSchema.parse({
         ...visibleTranscript,
@@ -2209,6 +2783,7 @@ function createApp(
       if (!isProviderEnabled(providerForThreadId(threadId))) {
         return disabledProviderResponse(context, providerForThreadId(threadId));
       }
+      await ensureThreadCwd(threadId);
       const limit = parseTranscriptMessageLimit(context.req.query('limit')) ?? 40;
       if (isClaudeThreadId(threadId)) {
         if (!options.claudeCode) {
@@ -2320,10 +2895,9 @@ function createApp(
 
       const sliceStart = Math.max(0, beforeIndex - limit);
       const olderSlice = transcript.messages.slice(sliceStart, beforeIndex);
-      const exposed = exposeLocalAttachments(
+      const exposed = transformTranscript(
         ThreadTranscriptSchema.parse({ ...transcript, messages: olderSlice }),
-        threadId,
-        localAttachments
+        threadId
       );
 
       return context.json(
@@ -2338,6 +2912,153 @@ function createApp(
     }
   });
 
+  app.get('/threads/:threadId/files/:fileReferenceId', async (context) => {
+    const auth = await authenticate(context);
+    if (!auth.ok) {
+      return context.json({ error: auth.reason }, auth.reason === 'revoked' ? 403 : 401);
+    }
+
+    const threadId = context.req.param('threadId');
+    const fileReferenceId = context.req.param('fileReferenceId');
+    const provider = providerForThreadId(threadId);
+    if (!isProviderEnabled(provider)) {
+      return disabledProviderResponse(context, provider);
+    }
+
+    const cachedTranscript = transcriptCache.get(threadId);
+    let visibleTranscript = cachedTranscript;
+    let fileReference = visibleTranscript
+      ? findThreadFileReference(visibleTranscript, fileReferenceId)
+      : undefined;
+
+    if (!fileReference) {
+      const transcriptResult = await settleWithin(
+        readTranscriptForHandoff(threadId, provider).catch(() => undefined),
+        1_500
+      );
+      if (transcriptResult.ok && transcriptResult.value) {
+        visibleTranscript = transformTranscript(transcriptResult.value, threadId);
+        fileReference = findThreadFileReference(visibleTranscript, fileReferenceId);
+      }
+    }
+
+    if (!visibleTranscript || !fileReference) {
+      return context.json({ error: 'This file cannot be previewed from the phone.' }, 404);
+    }
+
+    const cwd =
+      threadCwdByThreadId.get(threadId) ??
+      findThreadFileReferenceCwd(visibleTranscript, fileReferenceId) ??
+      (await ensureThreadCwd(threadId));
+    if (!cwd) {
+      return context.json({ error: 'This file cannot be previewed from the phone.' }, 404);
+    }
+
+    try {
+      const preview = await readThreadFilePreview(fileReference, cwd);
+      return context.json(preview);
+    } catch (error) {
+      if (error instanceof FilePreviewError) {
+        const status =
+          error.status === 413 ? 413 :
+          error.status === 415 ? 415 :
+          error.status === 404 ? 404 :
+          400;
+        return context.json({ error: error.message }, status);
+      }
+      return context.json({ error: 'This file cannot be previewed from the phone.' }, 500);
+    }
+  });
+
+  app.get('/threads/:threadId/goal', async (context) => {
+    const auth = await authenticate(context);
+    if (!auth.ok) {
+      return context.json({ error: auth.reason }, auth.reason === 'revoked' ? 403 : 401);
+    }
+
+    const threadId = context.req.param('threadId');
+    if (providerForThreadId(threadId) !== 'codex') {
+      return context.json({ error: 'Goal mode is only available for Codex threads.' }, 400);
+    }
+    if (!options.appServer?.isConnected() || !options.appServer.readGoal) {
+      return context.json({ error: 'Codex app-server goal API is unavailable.' }, 503);
+    }
+
+    try {
+      const goal = await options.appServer.readGoal(threadId);
+      return context.json(ThreadGoalResponseSchema.parse({ goal }));
+    } catch (error) {
+      return context.json({ error: codexGoalErrorMessage(error) }, 503);
+    }
+  });
+
+  app.put('/threads/:threadId/goal', async (context) => {
+    const auth = await authenticate(context);
+    if (!auth.ok) {
+      return context.json({ error: auth.reason }, auth.reason === 'revoked' ? 403 : 401);
+    }
+
+    if (!currentSettings.mobileSendEnabled) {
+      return context.json({ error: 'Mobile sending is off on the helper computer.' }, 403);
+    }
+
+    const threadId = context.req.param('threadId');
+    if (providerForThreadId(threadId) !== 'codex') {
+      return context.json({ error: 'Goal mode is only available for Codex threads.' }, 400);
+    }
+    if (!options.appServer?.isConnected() || !options.appServer.setGoal) {
+      return context.json({ error: 'Codex app-server goal API is unavailable.' }, 503);
+    }
+
+    const parsed = ThreadGoalUpdateRequestSchema.parse(await context.req.json());
+    try {
+      const goal = await options.appServer.setGoal(threadId, parsed);
+      hub.broadcast({ type: 'thread/goal/changed', payload: { threadId, goal } });
+      const cached = transcriptCache.get(threadId);
+      if (cached) {
+        const next = ThreadTranscriptSchema.parse({ ...cached, goal });
+        transcriptCache.set(threadId, next);
+        hub.broadcast({ type: 'thread/transcript/changed', payload: next });
+      }
+      return context.json(ThreadGoalResponseSchema.parse({ goal }));
+    } catch (error) {
+      return context.json({ error: codexGoalErrorMessage(error) }, 503);
+    }
+  });
+
+  app.delete('/threads/:threadId/goal', async (context) => {
+    const auth = await authenticate(context);
+    if (!auth.ok) {
+      return context.json({ error: auth.reason }, auth.reason === 'revoked' ? 403 : 401);
+    }
+
+    if (!currentSettings.mobileSendEnabled) {
+      return context.json({ error: 'Mobile sending is off on the helper computer.' }, 403);
+    }
+
+    const threadId = context.req.param('threadId');
+    if (providerForThreadId(threadId) !== 'codex') {
+      return context.json({ error: 'Goal mode is only available for Codex threads.' }, 400);
+    }
+    if (!options.appServer?.isConnected() || !options.appServer.clearGoal) {
+      return context.json({ error: 'Codex app-server goal API is unavailable.' }, 503);
+    }
+
+    try {
+      const cleared = await options.appServer.clearGoal(threadId);
+      hub.broadcast({ type: 'thread/goal/changed', payload: { threadId, goal: null } });
+      const cached = transcriptCache.get(threadId);
+      if (cached) {
+        const next = ThreadTranscriptSchema.parse({ ...cached, goal: null });
+        transcriptCache.set(threadId, next);
+        hub.broadcast({ type: 'thread/transcript/changed', payload: next });
+      }
+      return context.json(ThreadGoalClearResponseSchema.parse({ cleared }));
+    } catch (error) {
+      return context.json({ error: codexGoalErrorMessage(error) }, 503);
+    }
+  });
+
   app.post('/threads/:threadId/messages', async (context) => {
     const auth = await authenticate(context);
     if (!auth.ok) {
@@ -2345,7 +3066,7 @@ function createApp(
     }
 
     if (!currentSettings.mobileSendEnabled) {
-      return context.json({ error: 'Mobile sending is off on the Mac.' }, 403);
+      return context.json({ error: 'Mobile sending is off on the helper computer.' }, 403);
     }
 
     const parsed = ThreadMessageRequestSchema.parse(await context.req.json());
@@ -2450,6 +3171,35 @@ function createApp(
       // Slash commands the Codex desktop intercepts client-side. Sending the
       // raw text "/compact" as a turn would just be a literal user message;
       // instead we route to the matching v2 RPC so the actual command runs.
+      const goalSlashObjective =
+        outgoingAttachments.display.length === 0 ? matchGoalSlashCommand(parsed.text) : undefined;
+      if (goalSlashObjective !== undefined) {
+        if (!options.appServer?.setGoal) {
+          throw new SendBlockedError(
+            'thread_unavailable',
+            'Goal mode requires the Codex app-server goal API.'
+          );
+        }
+        if (!goalSlashObjective) {
+          throw new SendBlockedError(
+            'thread_unavailable',
+            'Add the goal after /goal, or use the Goal mode panel.'
+          );
+        }
+        const goal = await options.appServer.setGoal(threadId, {
+          objective: goalSlashObjective,
+          status: 'active'
+        });
+        hub.broadcast({ type: 'thread/goal/changed', payload: { threadId, goal } });
+        const cached = transcriptCache.get(threadId);
+        if (cached) {
+          const next = ThreadTranscriptSchema.parse({ ...cached, goal });
+          transcriptCache.set(threadId, next);
+          hub.broadcast({ type: 'thread/transcript/changed', payload: next });
+        }
+        return context.json(slashCommandAckResponse(threadId, 'goal', textToSend, goal));
+      }
+
       const slashCommand =
         outgoingAttachments.display.length === 0 ? matchBareSlashCommand(parsed.text) : undefined;
       if (slashCommand) {
@@ -2465,16 +3215,35 @@ function createApp(
         }
       }
 
-      // Prefer the desktop IPC path for existing Codex threads so remote sends
-      // show up in the real Codex window. If that bridge cannot deliver, fall
-      // back to the app-server path so tablet/remote sends still work.
+      if (!desktopControlDisabled && !mirrorReady) {
+        return context.json(
+          { error: 'Codex desktop IPC is not connected. Open Codex on the helper computer to send.' },
+          503
+        );
+      }
+      if (desktopControlDisabled && !appServerReady) {
+        return context.json(
+          { error: 'Codex app-server is not connected. Open Codex on this Mac to send.' },
+          503
+        );
+      }
+
       const override = pendingModelOverrides.get(threadId);
+      const cwdForPermissionMode = parsed.permissionMode
+        ? threadCwdByThreadId.get(threadId)
+        : undefined;
       const mirrorSendOptions =
-        override || parsed.collaborationMode || outgoingAttachments.provider.length > 0
+        override ||
+        parsed.collaborationMode ||
+        parsed.permissionMode ||
+        outgoingAttachments.provider.length > 0
           ? {
               ...(override ? { model: override.model } : {}),
               ...(override?.effort ? { effort: override.effort } : {}),
               ...(parsed.collaborationMode ? { collaborationMode: parsed.collaborationMode } : {}),
+              ...(parsed.permissionMode
+                ? { permissionMode: parsed.permissionMode, ...(cwdForPermissionMode ? { cwd: cwdForPermissionMode } : {}) }
+                : {}),
               ...(outgoingAttachments.provider.length
                 ? { attachments: outgoingAttachments.provider }
                 : {})
@@ -2494,20 +3263,7 @@ function createApp(
         );
 
       if (mirrorReady) {
-        try {
-          result = ThreadMessageResponseSchema.parse(await sendWithMirror(true, {}));
-        } catch (error) {
-          if (!appServerReady || !options.appServer?.sendMessage) {
-            throw error;
-          }
-          console.warn('[send] IPC mirror could not deliver thread send; falling back to app-server', {
-            threadId,
-            reason: error instanceof SendBlockedError ? error.reason : String(error)
-          });
-          result = ThreadMessageResponseSchema.parse(
-            await options.appServer.sendMessage(threadId, textToSend, mirrorSendOptions)
-          );
-        }
+        result = ThreadMessageResponseSchema.parse(await sendWithMirror(true, {}));
       } else {
         result = ThreadMessageResponseSchema.parse(
           await options.appServer!.sendMessage(threadId, textToSend, mirrorSendOptions)
@@ -2815,6 +3571,57 @@ function createApp(
   // Watch APNs registration: stores the watch's APNs device token against the
   // already-paired DeviceRecord. Delivery is handled by the status-transition
   // hook above and uses the helper APNs settings as the trusted server side.
+  // Phone APNs registration: stores the iPhone APNs token and routing metadata
+  // against the already-paired DeviceRecord. iOS can then mirror those phone
+  // notifications to Apple Watch, so the watch app does not need its own APNs
+  // token or direct helper registration.
+  app.post('/devices/phone-push', async (context) => {
+    const auth = await authenticate(context);
+    if (!auth.ok) {
+      return context.json({ error: auth.reason }, auth.reason === 'revoked' ? 403 : 401);
+    }
+
+    const rawBody = await context.req.json().catch(() => undefined);
+    if (!rawBody) {
+      return context.json({ error: 'Request body required.' }, 400);
+    }
+    const parsed = WatchPushRegisterRequestSchema.parse(rawBody);
+    await options.registry.setWatchPushToken(auth.device.deviceId, parsed.pushToken, {
+      bundleId: parsed.bundleId,
+      environment: parsed.environment,
+      preferences: parsed.preferences ? PushNotificationPreferencesSchema.parse(parsed.preferences) : undefined
+    });
+    return context.json(WatchPushRegisterResponseSchema.parse({ ok: true }));
+  });
+
+  app.post('/devices/phone-push/preferences', async (context) => {
+    const auth = await authenticate(context);
+    if (!auth.ok) {
+      return context.json({ error: auth.reason }, auth.reason === 'revoked' ? 403 : 401);
+    }
+
+    const rawBody = await context.req.json().catch(() => undefined);
+    if (!rawBody) {
+      return context.json({ error: 'Request body required.' }, 400);
+    }
+    const parsed = PushNotificationPreferencesUpdateRequestSchema.parse(rawBody);
+    await options.registry.setWatchPushPreferences(auth.device.deviceId, parsed.preferences);
+    return context.json(WatchPushRegisterResponseSchema.parse({ ok: true }));
+  });
+
+  app.delete('/devices/phone-push', async (context) => {
+    const auth = await authenticate(context);
+    if (!auth.ok) {
+      return context.json({ error: auth.reason }, auth.reason === 'revoked' ? 403 : 401);
+    }
+    await options.registry.setWatchPushToken(auth.device.deviceId, undefined);
+    return context.json(WatchPushRegisterResponseSchema.parse({ ok: true }));
+  });
+
+  // Backward-compatible route for older watch builds. New phone builds use
+  // /devices/phone-push, but the stored fields stay watchPush* for now to
+  // avoid a storage migration.
+  // Older native watch builds can also register directly through /devices/watch-push.
   app.post('/devices/watch-push', async (context) => {
     const auth = await authenticate(context);
     if (!auth.ok) {
@@ -2828,7 +3635,8 @@ function createApp(
     const parsed = WatchPushRegisterRequestSchema.parse(rawBody);
     await options.registry.setWatchPushToken(auth.device.deviceId, parsed.pushToken, {
       bundleId: parsed.bundleId,
-      environment: parsed.environment
+      environment: parsed.environment,
+      preferences: parsed.preferences ? PushNotificationPreferencesSchema.parse(parsed.preferences) : undefined
     });
     return context.json(WatchPushRegisterResponseSchema.parse({ ok: true }));
   });
@@ -3034,25 +3842,6 @@ function createApp(
         return context.json({ error: `Could not record Copilot approval: ${detail}` }, 503);
       }
     }
-    const appServer = options.appServer;
-    const appServerPending = appServer?.getPendingApprovalRequests?.(threadId) ?? [];
-    if (
-      appServerPending.some((request) => request.id === requestId && request.method === parsed.method)
-    ) {
-      if (!appServer?.respondToApproval || !appServer.isConnected()) {
-        return context.json(
-          { error: 'Codex app-server is not available to respond to this approval.' },
-          503
-        );
-      }
-      try {
-        await appServer.respondToApproval(threadId, requestId, parsed.method, parsed.decision);
-        return context.json(ApprovalDecisionResponseSchema.parse({ ok: true }));
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        return context.json({ error: `Could not record approval: ${detail}` }, 503);
-      }
-    }
     if (desktopControlDisabled) {
       return context.json(
         { error: 'Codex desktop control is disabled for this Agent Pulse runtime.' },
@@ -3063,6 +3852,12 @@ function createApp(
       return context.json(
         { error: 'Codex desktop IPC is not available to respond to approvals.' },
         503
+      );
+    }
+    if (!codexPendingRequestsForThread(threadId).some((request) => request.id === requestId && request.method === parsed.method)) {
+      return context.json(
+        { error: 'This Codex approval request is not pending for this thread anymore.' },
+        409
       );
     }
     try {
@@ -3076,7 +3871,8 @@ function createApp(
           ),
         options.opener,
         threadId,
-        options.mirror
+        options.mirror,
+        { openBeforeApply: false }
       );
       return context.json(ApprovalDecisionResponseSchema.parse({ ok: true }));
     } catch (error) {
@@ -3146,7 +3942,7 @@ function createApp(
     // Single source of truth: drive the change through the IPC follower so
     // the desktop window shows the same "GPT-5.5 -> {selected}" model picker
     // animation as Shift+Tab in the local Codex window.
-    // runWithFollowerOwnership opens the thread on the Mac if Codex desktop
+    // runWithFollowerOwnership opens the thread on the helper computer if Codex desktop
     // doesn't already own it, then waits for the ownership broadcast before
     // sending. Errors propagate as 503 so the tablet's model chip rolls back.
     if (desktopControlDisabled) {
@@ -3157,7 +3953,7 @@ function createApp(
     }
     if (!options.mirror?.setModelAndReasoning || !options.mirror.isConnected()) {
       return context.json(
-        { error: 'Codex desktop is not connected. Open Codex on this Mac to change the model.' },
+        { error: 'Codex desktop is not connected. Open Codex on the helper computer to change the model.' },
         503
       );
     }
@@ -3244,8 +4040,8 @@ function createApp(
   }
 
   const transformTranscript = (transcript: ThreadTranscript, threadId: string): ThreadTranscript => {
-    // The poller hands us a fresh transcript on every successful reconcile — cache it so
-    // the HTTP fallback path always has a recent copy to serve when a live read times out.
+    // Keep a base transcript for live overlays. HTTP transcript reads do not use
+    // this as a fallback, because the phone must not treat old data as current.
     const appServerTranscript =
       options.appServer?.applyLiveState?.(transcript, threadId) ?? transcript;
     const compactionTranscript = applyMirrorCompactionState(
@@ -3263,9 +4059,14 @@ function createApp(
       threadId,
       options.mirror
     );
-    transcriptCache.set(threadId, transcriptWithFileChanges);
+    const transcriptWithFileReferences = decorateTranscriptFileReferences(
+      transcriptWithFileChanges,
+      threadId,
+      threadCwdByThreadId.get(threadId)
+    );
+    transcriptCache.set(threadId, transcriptWithFileReferences);
     const exposed = exposeLocalAttachments(
-      applyMobileSendState(transcriptWithFileChanges, currentSettings),
+      applyMobileSendState(transcriptWithFileReferences, currentSettings),
       threadId,
       localAttachments
     );
@@ -3341,6 +4142,16 @@ function createApp(
     liveSubscribedThreadIds.clear();
     hub.broadcast({ type: 'health/changed', payload: healthPayload(options, startedAt) });
   });
+  const detachMirrorStreaming = options.mirror?.onStreamingChange?.((event) => {
+    hub.broadcast({ type: 'thread/streaming-changed', payload: event });
+    const cached = transcriptCache.get(event.threadId);
+    if (cached) {
+      hub.broadcast({ type: 'thread/transcript/changed', payload: transformTranscript(cached, event.threadId) });
+    }
+    if (!event.isStreaming) {
+      void broadcastFreshTranscript(event.threadId);
+    }
+  });
   const detachMirrorPendingApprovals = options.mirror?.onPendingApprovalsChange?.((event) => {
     hub.broadcast({ type: 'thread/pending-approvals/changed', payload: event });
     void listAllThreads()
@@ -3397,6 +4208,7 @@ function createApp(
       detachCopilotLiveState?.();
       detachAppServerTurnCompleted?.();
       detachAppServerConnection?.();
+      detachMirrorStreaming?.();
       detachMirrorPendingApprovals?.();
       detachMirrorFileChanges?.();
     }
@@ -3495,7 +4307,7 @@ function projectPathPreference(projectPath: string): number {
 // desktop window doesn't currently own the thread, the follower call returns
 // `client-cannot-handle-request` and surfaces here as a SendBlockedError with
 // reason 'thread_unavailable'. Wrap the apply call in this helper to:
-//   1. Open the thread on the Mac if it isn't owned, so the desktop window
+//   1. Open the thread on the helper computer if it isn't owned, so the desktop window
 //      becomes the owner.
 //   2. Wait up to ownershipTimeoutMs for the matching `thread-stream-state-changed`
 //      broadcast confirming ownership.
@@ -3511,20 +4323,22 @@ async function runWithFollowerOwnership<T>(
     ownershipTimeoutMs?: number;
     retryDelayMs?: number;
     allowOpen?: boolean;
+    openBeforeApply?: boolean;
     openThreadOptions?: Parameters<ThreadOpener['openThread']>[1];
   } = {}
 ): Promise<T> {
   const ownershipTimeoutMs = options.ownershipTimeoutMs ?? 4_000;
   const retryDelayMs = options.retryDelayMs ?? 800;
   const allowOpen = options.allowOpen ?? true;
+  const openBeforeApply = options.openBeforeApply ?? true;
   const openThreadOptions = options.openThreadOptions ?? { refreshMode: 'mini-window' };
   let openedForOwnership = false;
 
   const owned = mirror?.isThreadOwned?.(threadId);
-  debugLog('[ownership] enter', { threadId, owned, allowOpen });
+  debugLog('[ownership] enter', { threadId, owned, allowOpen, openBeforeApply });
 
-  if (allowOpen && mirror?.isThreadOwned && !owned) {
-    debugLog('[ownership] not owned — opening thread on Mac', { threadId });
+  if (allowOpen && openBeforeApply && mirror?.isThreadOwned && !owned) {
+    debugLog('[ownership] not owned — opening thread locally', { threadId });
     try {
       await opener.openThread(threadId, openThreadOptions);
       openedForOwnership = true;
@@ -3879,7 +4693,7 @@ function applyMobileSendState(transcript: ThreadTranscript, settings: HelperSett
     sendState: {
       canSend: false,
       reason: 'mobile_send_disabled',
-      label: 'Mobile sending is off on the Mac.'
+      label: 'Mobile sending is off on the helper computer.'
     }
   });
 }
@@ -3977,13 +4791,15 @@ function parseTranscriptView(raw: string | undefined): TranscriptView {
 
 function presentTranscriptForView(
   transcript: ThreadTranscript,
-  view: TranscriptView
+  view: TranscriptView,
+  limit?: number
 ): ThreadTranscript {
   if (view !== 'watch') {
     return transcript;
   }
 
-  const messages = filterTranscriptMessagesForWatch(transcript);
+  const watchMessages = filterTranscriptMessagesForWatch(transcript);
+  const messages = limit ? watchMessages.slice(-limit) : watchMessages;
   if (messages.length === transcript.messages.length) {
     return transcript;
   }
@@ -4093,6 +4909,9 @@ function selectWatchFinalAssistantMessage(
 }
 
 function transcriptIsLiveForWatch(transcript: ThreadTranscript): boolean {
+  if (transcript.sendState.canSend || transcript.sendState.reason === 'ready') {
+    return false;
+  }
   if (transcript.sendState.reason === 'waiting_on_approval') {
     return true;
   }
@@ -4301,17 +5120,19 @@ function exposeLocalAttachment(
   localAttachments: Map<string, LocalAttachment>
 ): ChatAttachment {
   const { sourcePath, ...publicAttachment } = attachment;
-  if (!sourcePath) {
+  const dataImage = dataImageFromUrl(attachment.url);
+  if (!sourcePath && !dataImage) {
     return publicAttachment;
   }
 
   const token = createHash('sha256')
-    .update(`${threadId}:${attachment.id}:${sourcePath}`)
+    .update(`${threadId}:${attachment.id}:${sourcePath ?? attachment.url}`)
     .digest('hex')
     .slice(0, 32);
   localAttachments.set(token, {
-    sourcePath,
-    contentType: imageContentType(sourcePath),
+    ...(sourcePath ? { sourcePath } : {}),
+    ...(dataImage ? { data: dataImage.data } : {}),
+    contentType: dataImage?.contentType ?? imageContentType(sourcePath ?? ''),
     expiresAt: Date.now() + 2 * 60 * 60 * 1000
   });
   return {
@@ -4467,6 +5288,18 @@ async function requireAuth(request: Request, registry: DeviceRegistry) {
   );
 }
 
+function rejectUpgrade(socket: Duplex, status: 401 | 403 | 404): void {
+  const statusText =
+    status === 401 ? 'Unauthorized' : status === 403 ? 'Forbidden' : 'Not Found';
+  try {
+    socket.write(
+      `HTTP/1.1 ${status} ${statusText}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`
+    );
+  } finally {
+    socket.destroy();
+  }
+}
+
 function attachWebSocketEvents(
   server: Server,
   hub: LiveEventHub,
@@ -4479,7 +5312,7 @@ function attachWebSocketEvents(
   server.on('upgrade', (request, socket, head) => {
     // Wrap the async work so that any thrown error is logged and the socket is
     // closed cleanly. Without this, a rejection from registry.validate (e.g. the
-    // macOS Keychain command failing) becomes an unhandled rejection — fatal on
+    // platform credential-store command failing) becomes an unhandled rejection — fatal on
     // Node 22+ — and the helper exits, after which cloudflared sees
     // "connection refused" on every retry until the helper is restarted.
     void (async () => {
@@ -4493,22 +5326,12 @@ function attachWebSocketEvents(
             tabletDevProxy.proxyUpgrade(request, socket, head);
             return;
           }
-          console.warn('[ws-upgrade] rejected: unknown path', {
-            path: url.pathname,
-            remoteAddress,
-            origin
-          });
-          socket.destroy();
+          rejectUpgrade(socket, 404);
           return;
         }
 
         if (!isAllowedOriginHeaders(nodeHeaderGetter(request), currentSettings())) {
-          console.warn('[ws-upgrade] rejected: origin not allowed', {
-            origin,
-            host: request.headers.host ?? '(none)',
-            remoteAddress
-          });
-          socket.destroy();
+          rejectUpgrade(socket, 403);
           return;
         }
 
@@ -4520,15 +5343,7 @@ function attachWebSocketEvents(
         );
 
         if (!auth.ok) {
-          console.warn('[ws-upgrade] rejected: auth failed', {
-            reason: auth.reason,
-            deviceId: deviceId ?? '(none)',
-            hasToken: url.searchParams.has('token'),
-            hasFingerprint: url.searchParams.has('fingerprint'),
-            remoteAddress,
-            origin
-          });
-          socket.destroy();
+          rejectUpgrade(socket, auth.reason === 'revoked' ? 403 : 401);
           return;
         }
 
@@ -4602,6 +5417,7 @@ function startThreadPolling(
   transformTranscript?: (transcript: ThreadTranscript, threadId: string) => ThreadTranscript
 ) {
   let previous = new Map<string, string>();
+  let previousStatuses = new Map<string, Thread['status']>();
   let inFlight = false;
   let tickCount = 0;
 
@@ -4652,6 +5468,13 @@ function startThreadPolling(
         if (previous.get(thread.threadId) !== next.get(thread.threadId)) {
           hub.broadcast({ type: 'thread/upsert', payload: thread });
         }
+        const previousStatus = previousStatuses.get(thread.threadId);
+        if (previousStatus !== undefined && previousStatus !== thread.status) {
+          hub.broadcast({
+            type: 'thread/status/changed',
+            payload: { threadId: thread.threadId, status: thread.status }
+          });
+        }
         // Push transcripts for any thread we successfully reconciled. This keeps the tablet's
         // last-known-good messages fresh without using app-server status as the live state.
         if (transcript) {
@@ -4666,6 +5489,7 @@ function startThreadPolling(
       }
 
       previous = next;
+      previousStatuses = new Map(reconciled.map(({ thread }) => [thread.threadId, thread.status]));
 
       // Do not prune seen-thread entries from this poll result. The thread list
       // is intentionally filtered/limited for the UI, so a missing id here does
@@ -4778,37 +5602,16 @@ function applyAppServerLiveThreadStatus(
   mirror: CodexMirrorBridge | undefined,
   liveStatuses?: Map<string, Thread['status']>
 ): Thread {
-  // Self-heal: if our in-memory mirror still believes this thread is waiting
-  // on approval but Codex's authoritative `thread/loaded/list` says the
-  // thread is idle, the resolution notification was missed (typical cause: a
-  // brief IPC disconnect mid-turn or a thread that lost ownership before the
-  // matching "remove approval" patch arrived). Without this, the orphan
-  // approval entry sticks forever and the tablet shows "Codex is waiting for
-  // approval" indefinitely. Clear it before computing the merged status so
-  // the rest of this function — and the broadcast pipeline — sees a clean
-  // slate.
-  const remoteForHeal = liveStatuses?.get(thread.threadId);
-  if (
-    remoteForHeal === 'idle' &&
-    mirror?.isThreadWaitingForApproval?.(thread.threadId) &&
-    mirror?.clearPendingApprovalsForThread
-  ) {
-    mirror.clearPendingApprovalsForThread(thread.threadId);
-  }
-
   // Live notification-derived state from in-memory flags (notifications are
   // pushed in real time and beat the snapshot returned by thread/loaded/list).
-  const mirrorApprovalRequests = mirror?.getPendingApprovalRequests?.(thread.threadId) ?? [];
-  const appServerApprovalRequests = appServer?.getPendingApprovalRequests?.(thread.threadId) ?? [];
+  const mirrorApprovalRequests =
+    mirror?.isConnected() && mirror?.isThreadWaitingForApproval?.(thread.threadId)
+      ? mirror.getPendingApprovalRequests?.(thread.threadId) ?? []
+      : [];
   let inMemoryStatus: Thread['status'] | undefined;
   if (
     mirrorApprovalRequests.length > 0 &&
     mirror?.isThreadWaitingForApproval?.(thread.threadId)
-  ) {
-    inMemoryStatus = 'waiting_approval';
-  } else if (
-    appServerApprovalRequests.length > 0 &&
-    appServer?.isThreadWaitingForApproval?.(thread.threadId)
   ) {
     inMemoryStatus = 'waiting_approval';
   } else if (appServer?.isThreadCompacting?.(thread.threadId)) {
@@ -4827,6 +5630,11 @@ function applyAppServerLiveThreadStatus(
   const remote = liveStatuses?.get(thread.threadId);
   if (remote === 'idle' && thread.status !== 'idle') {
     return ThreadSchema.parse({ ...thread, status: 'idle' });
+  }
+  if (remote === 'waiting_approval') {
+    return mirrorApprovalRequests.length > 0
+      ? ThreadSchema.parse({ ...thread, status: remote })
+      : thread;
   }
   if (remote && remote !== 'idle' && remote !== 'unknown') {
     return ThreadSchema.parse({ ...thread, status: remote });
@@ -4872,18 +5680,90 @@ function buildApprovalInbox(
   return { items: sorted, total: sorted.length };
 }
 
-function mergePendingApprovalRequests(
-  primary: PendingApprovalRequest[],
-  secondary: PendingApprovalRequest[]
-): PendingApprovalRequest[] {
-  const byKey = new Map<string, PendingApprovalRequest>();
-  for (const request of [...primary, ...secondary]) {
-    const key = `${request.method}:${request.id}`;
-    if (!byKey.has(key)) {
-      byKey.set(key, request);
-    }
+function watchApprovalNotificationSummary(requests: PendingApprovalRequest[]): {
+  title: string;
+  body: string;
+  approvalType: string;
+} {
+  const request = requests[0];
+  if (!request) {
+    return {
+      title: 'Agent needs approval',
+      body: 'A pending approval is waiting.',
+      approvalType: 'Approval'
+    };
   }
-  return [...byKey.values()];
+  const approvalType = approvalTypeLabel(request.method);
+  const reason = approvalShortReason(request);
+  const target = approvalCommandOrFileSummary(request);
+  const bodyParts = [reason, target].filter((part, index, values) => part && values.indexOf(part) === index);
+  return {
+    title: approvalType,
+    body: truncateForSummary(bodyParts.join(' - ') || 'Tap Approve or open the thread to review it.', 160),
+    approvalType
+  };
+}
+
+function buildWatchFinishedNotification(
+  threadId: string,
+  providerName: string,
+  thread: Thread | undefined,
+  transcript: ThreadTranscript | undefined
+): WatchPushNotification | undefined {
+  if (!transcript || transcriptIsLiveForWatch(transcript)) {
+    return undefined;
+  }
+  const project = watchThreadProjectLabel(thread);
+  const snippet = watchFinishedMessageSnippet(transcript);
+  if (!snippet) {
+    return undefined;
+  }
+  const body = [project, snippet]
+    .filter((part): part is string => Boolean(part))
+    .join(': ');
+  return {
+    threadId,
+    kind: 'finished',
+    title: `${providerName} finished`,
+    body: truncateForSummary(body || 'Review the result on your watch.', 180)
+  };
+}
+
+function watchThreadProjectLabel(thread: Thread | undefined): string | undefined {
+  if (!thread) {
+    return undefined;
+  }
+  const workspacePath = thread.workspacePath?.trim();
+  if (workspacePath && thread.workspaceKind !== 'chat') {
+    return path.basename(workspacePath) || workspacePath;
+  }
+  const workspace = thread.workspace.trim();
+  if (workspace && workspace.toLowerCase() !== 'chat' && workspace.toLowerCase() !== 'chats') {
+    return workspace;
+  }
+  return thread.title.trim() || undefined;
+}
+
+function watchFinishedMessageSnippet(
+  transcript: ThreadTranscript | undefined
+): string | undefined {
+  const latestMessage = [...(transcript?.messages ?? [])]
+    .reverse()
+    .find(
+      (message) =>
+        (message.role === 'assistant' || message.role === 'user') &&
+        message.kind === 'message' &&
+        message.text.trim()
+    );
+  if (!latestMessage || latestMessage.role !== 'assistant') {
+    return undefined;
+  }
+  const text = latestMessage.text;
+  const normalized = text?.replace(/\s+/g, ' ').trim();
+  if (!normalized || normalized === 'No summary yet.') {
+    return undefined;
+  }
+  return truncateForSummary(normalized, 120);
 }
 
 function buildTouchCommands(hasActiveThread: boolean, desktopControlDisabled = false) {
@@ -4913,8 +5793,8 @@ function buildTouchCommands(hasActiveThread: boolean, desktopControlDisabled = f
       context: 'global'
     },
     {
-      id: 'open-on-mac',
-      label: 'Open on Mac',
+      id: 'open-on-computer',
+      label: 'Open locally',
       description: 'Open the active thread locally.',
       action: 'open_on_mac',
       enabled: hasActiveThread && !desktopControlDisabled,
@@ -4995,7 +5875,11 @@ function approvalTypeLabel(method: string): string {
 
 function approvalShortReason(request: PendingApprovalRequest): string {
   const params = request.params ?? {};
-  const reason = stringParam(params, 'reason') || stringParam(params, 'title') || stringParam(params, 'question');
+  const reason =
+    stringParam(params, 'reason') ||
+    stringParam(params, 'title') ||
+    stringParam(params, 'question') ||
+    questionSummaryFromParams(params);
   return truncateForSummary(reason || approvalCommandOrFileSummary(request) || approvalTypeLabel(request.method), 180);
 }
 
@@ -5011,6 +5895,26 @@ function approvalCommandOrFileSummary(request: PendingApprovalRequest): string |
     return truncateForSummary(command, 220);
   }
   return stringParam(params, 'path') || stringParam(params, 'filePath') || stringParam(params, 'itemId');
+}
+
+function questionSummaryFromParams(params: Record<string, unknown>): string | undefined {
+  const questions = params.questions;
+  if (!Array.isArray(questions)) {
+    return undefined;
+  }
+
+  for (const rawQuestion of questions) {
+    if (!rawQuestion || typeof rawQuestion !== 'object' || Array.isArray(rawQuestion)) {
+      continue;
+    }
+    const question = rawQuestion as Record<string, unknown>;
+    const summary = stringParam(question, 'question') || stringParam(question, 'label') || stringParam(question, 'header');
+    if (summary) {
+      return summary;
+    }
+  }
+
+  return undefined;
 }
 
 function approvalRiskLevel(request: PendingApprovalRequest): ApprovalInboxItem['riskLevel'] {
@@ -5356,10 +6260,33 @@ function updateDraftThreadFromTranscript(draftThread: Thread, transcript: Thread
 // adds text after the command name we treat it as a normal message so anything
 // like "/compact please" still falls through as plain text.
 const BARE_SLASH_PATTERN = /^\s*\/([a-zA-Z][a-zA-Z0-9_-]*)\s*$/;
+const GOAL_SLASH_PATTERN = /^\s*\/goal(?:\s+([\s\S]+?))?\s*$/i;
 
 function matchBareSlashCommand(text: string): string | null {
   const match = BARE_SLASH_PATTERN.exec(text);
   return match ? match[1]!.toLowerCase() : null;
+}
+
+function matchGoalSlashCommand(text: string): string | undefined {
+  const match = GOAL_SLASH_PATTERN.exec(text);
+  if (!match) {
+    return undefined;
+  }
+  return match[1]?.trim() ?? '';
+}
+
+function codexGoalErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/goals feature is disabled/i.test(message)) {
+    return 'Codex goal mode is disabled in this Codex build or config.';
+  }
+  if (/thread not found|ephemeral thread/i.test(message)) {
+    return 'Goal mode needs a saved Codex thread.';
+  }
+  if (/invalid|budget/i.test(message)) {
+    return message;
+  }
+  return 'Could not update the Codex goal.';
 }
 
 // Returns a ThreadMessageResponse if the slash command was handled here, or
@@ -5401,6 +6328,13 @@ async function handleSlashCommand(
 
   // Commands we recognize but don't have a dedicated RPC path for — better to
   // tell the user than to silently send the literal text as a message.
+  if (command === 'goal') {
+    throw new SendBlockedError(
+      'thread_unavailable',
+      'Use the Goal mode panel in Agent Pulse to set or clear a Codex goal.'
+    );
+  }
+
   if (command === 'clear' || command === 'new' || command === 'help' || command === 'feedback' || command === 'model') {
     throw new SendBlockedError(
       'thread_unavailable',
@@ -5411,7 +6345,12 @@ async function handleSlashCommand(
   return null;
 }
 
-function slashCommandAckResponse(threadId: string, command: string, originalText: string): ThreadMessageResponse {
+function slashCommandAckResponse(
+  threadId: string,
+  command: string,
+  originalText: string,
+  goal?: ThreadGoal | null
+): ThreadMessageResponse {
   // Codex doesn't return a transcript for fire-and-forget commands. We include
   // a synthetic user message matching the slash text so the tablet's pending
   // bubble is confirmed (pendingMessageIsConfirmed checks for a user message
@@ -5432,7 +6371,8 @@ function slashCommandAckResponse(threadId: string, command: string, originalText
       threadId,
       activeTurnId: null,
       sendState: { canSend: true, reason: 'ready', label: 'Ready' },
-      messages: [syntheticMessage]
+      messages: [syntheticMessage],
+      ...(goal !== undefined ? { goal } : {})
     }
   });
 }
@@ -5475,7 +6415,7 @@ function applyMirrorCompactionState(
   }
   const activeTurnId = transcript.activeTurnId ?? `mirror-compaction:${threadId}`;
   const hasCompactionMessage = transcript.messages.some(
-    (message) => message.phase === 'context_compaction'
+    (message) => message.kind === 'compacted' || message.phase === 'context_compaction'
   );
   const messages = hasCompactionMessage
     ? transcript.messages
@@ -5484,7 +6424,7 @@ function applyMirrorCompactionState(
         ChatMessageSchema.parse({
           id: `context-compaction:${activeTurnId}`,
           role: 'activity',
-          kind: 'status',
+          kind: 'compacted',
           phase: 'context_compaction',
           text: 'Automatically compacting context',
           turnId: activeTurnId,
@@ -5811,7 +6751,21 @@ function parseThreadListGroupLimits(context: Context): Map<string, number> {
   return limits;
 }
 
-function providerThreadListOptions(groupLimits: Map<string, number>): ThreadListProviderOptions {
+function parseThreadListLimit(rawLimit: string | undefined): number | undefined {
+  if (!rawLimit) {
+    return undefined;
+  }
+  const limit = Number.parseInt(rawLimit, 10);
+  if (!Number.isFinite(limit)) {
+    return undefined;
+  }
+  return Math.min(MAX_EXPANDED_THREADS_PER_PROJECT, Math.max(1, Math.floor(limit)));
+}
+
+function providerThreadListOptions(
+  groupLimits: Map<string, number>,
+  defaultLimit: number = MAX_THREADS_PER_PROJECT
+): ThreadListProviderOptions {
   const providerGroupLimits = new Map<string, number>();
   for (const [groupKey, limit] of groupLimits.entries()) {
     providerGroupLimits.set(
@@ -5821,7 +6775,7 @@ function providerThreadListOptions(groupLimits: Map<string, number>): ThreadList
   }
 
   return {
-    defaultLimit: MAX_THREADS_PER_PROJECT + 1,
+    defaultLimit: Math.min(MAX_EXPANDED_THREADS_PER_PROJECT, defaultLimit + 1),
     groupLimits: providerGroupLimits
   };
 }

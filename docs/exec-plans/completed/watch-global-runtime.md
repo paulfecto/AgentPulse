@@ -3,7 +3,7 @@
 Make Agent Pulse Watch usable outside the LAN through a branded, stable,
 Codex-safe remote runtime.
 
-- status: in-progress
+- status: watch-beta-edge-current
 - owner: codex
 - started: 2026-05-05
 

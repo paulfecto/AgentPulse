@@ -2,22 +2,32 @@ import type {
   CatalogModel,
   ChatAttachment,
   ChatMessage,
+  CodexPermissionMode,
   CollaborationModeKind,
   LiveEvent,
   PendingApprovalRequest,
+  SelectableCodexPermissionModeId,
   Thread,
+  ThreadGoal,
   ThreadMessageResponse,
+  ThreadPlanItem,
   ThreadSendState,
-  ThreadTranscript
+  ThreadTranscript,
+  ThreadUsage
 } from '@agent-pulse/shared';
 import {
   ChatMessageSchema,
   CatalogModelSchema,
+  CodexPermissionModeSchema,
+  ThreadGoalSchema,
   ThreadMessageResponseSchema,
+  ThreadPlanItemSchema,
   ThreadSchema,
-  ThreadTranscriptSchema
+  ThreadTranscriptSchema,
+  ThreadUsageSchema
 } from '@agent-pulse/shared';
-import { workspaceNameFromCwd } from './thread-reader';
+import type { RolloutLookup } from './rollout-lookup';
+import { readLastLines, workspaceNameFromCwd } from './thread-reader';
 import {
   CodexTranscriptionAuthError,
   parseCodexTranscriptionAuthContext,
@@ -53,13 +63,19 @@ export type ThreadStartOptions = {
   /** Override the reasoning effort (e.g. 'low' | 'medium' | 'high' | 'xhigh').
    *  Sent as `model_reasoning_effort` inside the thread/start `config` blob. */
   reasoningEffort?: string;
+  permissionMode?: SelectableCodexPermissionModeId;
 };
 
 type TurnStartOptions = {
   model?: string;
   effort?: string;
   collaborationMode?: CollaborationModeKind;
+  permissionMode?: SelectableCodexPermissionModeId;
   attachments?: ChatAttachment[];
+};
+
+export type CodexAppServerChatOptions = {
+  rolloutLookup?: RolloutLookup;
 };
 
 type AppServerCollaborationMode = {
@@ -83,6 +99,29 @@ type AppServerThreadResponse = {
   permissionProfile?: unknown;
   sandbox?: unknown;
   serviceTier?: unknown;
+};
+
+type AppServerThreadGoalStatus = 'active' | 'paused' | 'budgetLimited' | 'complete';
+
+type AppServerThreadGoal = {
+  threadId?: string;
+  thread_id?: string;
+  objective?: string;
+  status?: AppServerThreadGoalStatus | 'budget_limited';
+  tokenBudget?: number | null;
+  token_budget?: number | null;
+  tokensUsed?: number;
+  tokens_used?: number;
+  timeUsedSeconds?: number;
+  time_used_seconds?: number;
+  createdAt?: number;
+  created_at?: number;
+  updatedAt?: number;
+  updated_at?: number;
+};
+
+type AppServerThreadGoalResponse = {
+  goal?: AppServerThreadGoal | null;
 };
 
 type AppServerThreadTurnsListResponse = {
@@ -174,6 +213,7 @@ type AppServerThread = {
   permissionProfile?: unknown;
   sandboxPolicy?: unknown;
   serviceTier?: unknown;
+  collaborationMode?: CollaborationModeKind;
 };
 
 type AppServerThreadStatus =
@@ -208,6 +248,7 @@ type AppServerThreadItem =
       type: 'plan';
       id: string;
       text: string;
+      plan?: unknown[];
     }
   | {
       type: 'reasoning';
@@ -248,6 +289,11 @@ type AppServerLiveThreadState = {
   isCompacting: boolean;
   pendingRequests: Map<string, PendingApprovalRequest>;
   liveMessages: Map<string, ChatMessage>;
+  retainedPlanMessages: Map<string, ChatMessage>;
+  goal?: ThreadGoal | null;
+  usage?: ThreadUsage;
+  tokenUsageTotal?: number;
+  goalTokenBaseline?: number;
   lastStreaming: boolean;
 };
 
@@ -256,7 +302,9 @@ type AppServerThreadExecutionSettings = {
   approvalsReviewer?: unknown;
   permissionProfile?: unknown;
   sandboxPolicy?: unknown;
+  cwd?: string;
   serviceTier?: unknown;
+  collaborationMode?: CollaborationModeKind;
 };
 
 export type AppServerTurnCompletedEvent = {
@@ -285,7 +333,7 @@ function contextCompactionMessage(input: {
   return ChatMessageSchema.parse({
     id: input.id,
     role: 'activity',
-    kind: 'status',
+    kind: 'compacted',
     phase: CONTEXT_COMPACTION_PHASE,
     text: CONTEXT_COMPACTION_LABEL,
     ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -344,8 +392,12 @@ export class CodexAppServerChat {
   private readonly liveStateListeners = new Set<(threadId: string) => void>();
   private readonly connectionListeners = new Set<(connected: boolean) => void>();
   private readonly turnCompletedListeners = new Set<(event: AppServerTurnCompletedEvent) => void>();
+  private goalsFeatureEnablementTried = false;
 
-  constructor(private readonly transport: CodexAppServerTransport) {
+  constructor(
+    private readonly transport: CodexAppServerTransport,
+    private readonly options: CodexAppServerChatOptions = {}
+  ) {
     this.transport.onNotification?.((notification) => this.handleNotification(notification));
     this.transport.onServerRequest?.((request) => this.handleServerRequest(request));
     this.transport.onConnectionChange?.((connected) => this.emitConnectionChange(connected));
@@ -369,7 +421,7 @@ export class CodexAppServerChat {
     if (!this.transport.isConnected()) {
       throw new SendBlockedError(
         'thread_unavailable',
-        'Codex app-server is not connected. Open Codex on your Mac to use voice transcription.'
+        'Codex app-server is not connected. Open Codex on the helper computer to use voice transcription.'
       );
     }
 
@@ -416,7 +468,7 @@ export class CodexAppServerChat {
 
   async readTranscript(threadId: string): Promise<ThreadTranscript> {
     const thread = await this.readThreadSnapshot(threadId);
-    return mapThreadToTranscript(thread);
+    return this.applyRolloutTranscriptContext(mapThreadToTranscript(thread));
   }
 
   async readFullTranscript(threadId: string): Promise<ThreadTranscript> {
@@ -424,14 +476,33 @@ export class CodexAppServerChat {
       threadId,
       includeTurns: true
     });
-    return mapThreadToTranscript(
+    return this.applyRolloutTranscriptContext(mapThreadToTranscript(
       {
         ...response.thread,
         model: response.model ?? response.thread.model ?? null,
         reasoningEffort: response.reasoningEffort ?? response.thread.reasoningEffort ?? null
       },
       { messageLimit: null }
-    );
+    ));
+  }
+
+  private async applyRolloutTranscriptContext(transcript: ThreadTranscript): Promise<ThreadTranscript> {
+    const rolloutLookup = this.options.rolloutLookup;
+    if (!rolloutLookup) {
+      return transcript;
+    }
+
+    const rolloutPath = await rolloutLookup.findRolloutPath(transcript.threadId).catch(() => null);
+    if (!rolloutPath) {
+      return transcript;
+    }
+
+    try {
+      const lines = await readLastLines(rolloutPath, 2_000, 32 * 1024 * 1024);
+      return applyRolloutContextToTranscript(transcript, rolloutTranscriptContextFromLines(lines));
+    } catch {
+      return transcript;
+    }
   }
 
   async subscribeThread(threadId: string): Promise<void> {
@@ -538,6 +609,8 @@ export class CodexAppServerChat {
       input: userTextInput(trimmed, options.attachments),
       ...turnStartOverrides(options, thread)
     });
+    this.rememberPermissionModeOverride(threadId, options.permissionMode, thread.cwd);
+    this.rememberCollaborationModeOverride(threadId, options.collaborationMode);
     this.markLiveTurnStarted(threadId, response.turn.id, trimmed);
     const updatedTranscript = await this.readTranscriptAfterAcceptedSend(threadId).catch((error) => {
       if (isUnmaterializedDraftError(error)) {
@@ -598,6 +671,90 @@ export class CodexAppServerChat {
     this.emitThreadStateChanged(threadId);
   }
 
+  async readGoal(threadId: string): Promise<ThreadGoal | null> {
+    const response = await this.transport.request<AppServerThreadGoalResponse>('thread/goal/get', {
+      threadId
+    });
+    const state = this.stateForThread(threadId);
+    const goal = mergeGoalProgress(state.goal, normalizeAppServerGoal(response.goal));
+    state.goal = goal;
+    this.resetGoalTokenBaseline(threadId, goal);
+    this.emitLiveStateChange(threadId);
+    return goal;
+  }
+
+  async setGoal(
+    threadId: string,
+    input: { objective?: string; status?: ThreadGoal['status']; tokenBudget?: number | null }
+  ): Promise<ThreadGoal> {
+    const params: Record<string, unknown> = { threadId };
+    if (input.objective !== undefined) {
+      params.objective = input.objective;
+    }
+    if (input.status !== undefined) {
+      params.status = goalStatusToAppServer(input.status);
+    }
+    if (input.tokenBudget !== undefined) {
+      params.tokenBudget = input.tokenBudget;
+    }
+    const response = await this.requestGoalSet(params);
+    const state = this.stateForThread(threadId);
+    const goal = mergeGoalProgress(state.goal, normalizeAppServerGoal(response.goal));
+    if (!goal) {
+      throw new Error('Codex did not return the updated goal.');
+    }
+    state.goal = goal;
+    this.resetGoalTokenBaseline(threadId, goal);
+    this.emitLiveStateChange(threadId);
+    return goal;
+  }
+
+  async clearGoal(threadId: string): Promise<boolean> {
+    const response = await this.requestGoalClear({
+      threadId
+    });
+    this.stateForThread(threadId).goal = null;
+    this.stateForThread(threadId).goalTokenBaseline = undefined;
+    this.emitLiveStateChange(threadId);
+    return response.cleared === true;
+  }
+
+  private async requestGoalSet(
+    params: Record<string, unknown>
+  ): Promise<AppServerThreadGoalResponse> {
+    try {
+      return await this.transport.request<AppServerThreadGoalResponse>('thread/goal/set', params);
+    } catch (error) {
+      if (!isGoalFeatureDisabledError(error)) {
+        throw error;
+      }
+      await this.enableGoalsFeature();
+      return this.transport.request<AppServerThreadGoalResponse>('thread/goal/set', params);
+    }
+  }
+
+  private async requestGoalClear(params: { threadId: string }): Promise<{ cleared?: boolean }> {
+    try {
+      return await this.transport.request<{ cleared?: boolean }>('thread/goal/clear', params);
+    } catch (error) {
+      if (!isGoalFeatureDisabledError(error)) {
+        throw error;
+      }
+      await this.enableGoalsFeature();
+      return this.transport.request<{ cleared?: boolean }>('thread/goal/clear', params);
+    }
+  }
+
+  private async enableGoalsFeature(): Promise<void> {
+    if (this.goalsFeatureEnablementTried) {
+      return;
+    }
+    this.goalsFeatureEnablementTried = true;
+    await this.transport.request('experimentalFeature/enablement/set', {
+      enablement: { goals: true }
+    });
+  }
+
   async archiveThread(threadId: string): Promise<void> {
     await this.transport.request('thread/archive', { threadId });
     this.liveThreads.delete(threadId);
@@ -639,21 +796,32 @@ export class CodexAppServerChat {
       return transcript;
     }
 
-    const syntheticTurnId = state.activeTurnId ?? appServerLiveTurnId(threadId);
-    const existingMessageIds = new Set(transcript.messages.map((message) => message.id));
-    const liveMessages = [...state.liveMessages.values()].filter(
-      (message) => !existingMessageIds.has(message.id) && !transcriptConfirmsLiveMessage(message, transcript.messages)
+    const transcriptWithProgress = transcriptWithLiveProgress(transcript, state);
+    const transcriptWithPlans = transcriptWithRetainedPlanMessages(
+      transcriptWithProgress,
+      state.retainedPlanMessages
     );
-    const messages = [...transcript.messages, ...liveMessages];
+    const syntheticTurnId = state.activeTurnId ?? appServerLiveTurnId(threadId);
+    const existingMessageIds = new Set(transcriptWithPlans.messages.map((message) => message.id));
+    const liveMessages = [...state.liveMessages.values()].filter(
+      (message) =>
+        !existingMessageIds.has(message.id) &&
+        !transcriptConfirmsLiveMessage(message, transcriptWithPlans.messages)
+    );
+    const messages = appendUserInputRequestMessages(
+      [...transcriptWithPlans.messages, ...liveMessages],
+      [...state.pendingRequests.values()]
+    );
 
     if (state.pendingRequests.size > 0) {
+      const needsUserInput = [...state.pendingRequests.values()].some(isUserInputRequest);
       return ThreadTranscriptSchema.parse({
-        ...transcript,
-        activeTurnId: transcript.activeTurnId ?? syntheticTurnId,
+        ...transcriptWithPlans,
+        activeTurnId: transcriptWithPlans.activeTurnId ?? syntheticTurnId,
         sendState: {
           canSend: false,
-          reason: 'waiting_on_approval',
-          label: 'Codex is waiting for approval'
+          reason: needsUserInput ? 'waiting_on_user_input' : 'waiting_on_approval',
+          label: needsUserInput ? 'Codex needs your answer.' : 'Codex is waiting for approval'
         },
         messages
       });
@@ -661,8 +829,8 @@ export class CodexAppServerChat {
 
     if (state.isCompacting) {
       return ThreadTranscriptSchema.parse({
-        ...transcript,
-        activeTurnId: transcript.activeTurnId ?? syntheticTurnId,
+        ...transcriptWithPlans,
+        activeTurnId: transcriptWithPlans.activeTurnId ?? syntheticTurnId,
         sendState: {
           canSend: false,
           reason: 'compacting_context',
@@ -674,10 +842,10 @@ export class CodexAppServerChat {
 
     if (state.isStreaming) {
       return ThreadTranscriptSchema.parse({
-        ...transcript,
-        activeTurnId: transcript.activeTurnId ?? syntheticTurnId,
-        sendState: transcript.activeTurnId
-          ? transcript.sendState
+        ...transcriptWithPlans,
+        activeTurnId: transcriptWithPlans.activeTurnId ?? syntheticTurnId,
+        sendState: transcriptWithPlans.activeTurnId
+          ? transcriptWithPlans.sendState
           : {
               canSend: false,
               reason: 'thread_changed',
@@ -687,14 +855,14 @@ export class CodexAppServerChat {
       });
     }
 
-    if (messages.length !== transcript.messages.length) {
+    if (messages.length !== transcriptWithPlans.messages.length) {
       return ThreadTranscriptSchema.parse({
-        ...transcript,
+        ...transcriptWithPlans,
         messages
       });
     }
 
-    return transcript;
+    return transcriptWithPlans;
   }
 
   async respondToApproval(
@@ -817,7 +985,7 @@ export class CodexAppServerChat {
     options: ThreadStartOptions = {}
   ): Promise<AppServerThreadStartParams> {
     const config = await this.readCodexConfig(cwd);
-    const sandbox = sandboxFromConfig(config);
+    const sandbox = sandboxFromPermissionMode(options.permissionMode) ?? sandboxFromConfig(config);
     const developerInstructions = stringField(config, 'developer_instructions');
     const serviceTier =
       stringField(config, 'service_tier') ?? stringField(config, 'model_service_tier');
@@ -830,8 +998,12 @@ export class CodexAppServerChat {
       cwd,
       model,
       modelProvider: stringField(config, 'model_provider') ?? null,
-      approvalsReviewer: 'user',
-      approvalPolicy: approvalPolicyFromConfig(config, sandbox),
+      approvalsReviewer:
+        approvalsReviewerFromPermissionMode(options.permissionMode) ??
+        approvalsReviewerFromConfig(config),
+      approvalPolicy:
+        approvalPolicyFromPermissionMode(options.permissionMode) ??
+        approvalPolicyFromConfig(config, sandbox),
       sandbox,
       config: threadConfig,
       personality: stringField(config, 'personality') ?? null,
@@ -893,13 +1065,14 @@ export class CodexAppServerChat {
     options: TurnStartOptions,
     thread: AppServerThread
   ): Promise<ThreadMessageResponse> {
-    const overrides = turnStartOverrides(options, thread);
+    const overrides = turnStartOverrides({ ...options, permissionMode: undefined }, thread);
     const response = await this.transport.request<{ turnId: string }>('turn/steer', {
       threadId,
       input: userTextInput(text, options.attachments),
       expectedTurnId,
       ...overrides
     });
+    this.rememberCollaborationModeOverride(threadId, options.collaborationMode);
     const updatedTranscript = await this.readTranscriptAfterAcceptedSend(threadId).catch(() =>
       startedDraftTranscript(threadId, text, response.turnId)
     );
@@ -921,6 +1094,12 @@ export class CodexAppServerChat {
       input: userTextInput(text, options.attachments),
       ...turnStartOverrides(options, undefined, this.threadExecutionSettings.get(threadId))
     });
+    this.rememberPermissionModeOverride(
+      threadId,
+      options.permissionMode,
+      this.threadExecutionSettings.get(threadId)?.cwd
+    );
+    this.rememberCollaborationModeOverride(threadId, options.collaborationMode);
     this.markLiveTurnStarted(threadId, response.turn.id, text);
     const transcript = await this.readTranscriptAfterAcceptedSend(threadId).catch((error) => {
       if (isUnmaterializedDraftError(error)) {
@@ -1004,6 +1183,41 @@ export class CodexAppServerChat {
     }
   }
 
+  private rememberPermissionModeOverride(
+    threadId: string,
+    mode: SelectableCodexPermissionModeId | undefined,
+    cwd?: string
+  ): void {
+    if (!mode) {
+      return;
+    }
+    this.threadExecutionSettings.set(threadId, {
+      ...this.threadExecutionSettings.get(threadId),
+      ...executionSettingsForPermissionMode(mode, cwd)
+    });
+  }
+
+  private rememberCollaborationModeOverride(
+    threadId: string,
+    mode: CollaborationModeKind | undefined
+  ): void {
+    if (!mode) {
+      return;
+    }
+    this.threadExecutionSettings.set(threadId, {
+      ...this.threadExecutionSettings.get(threadId),
+      collaborationMode: mode
+    });
+  }
+
+  private resetGoalTokenBaseline(threadId: string, goal: ThreadGoal | null): void {
+    const state = this.stateForThread(threadId);
+    state.goalTokenBaseline =
+      goal && state.tokenUsageTotal !== undefined
+        ? Math.max(0, state.tokenUsageTotal - goal.tokensUsed)
+        : undefined;
+  }
+
   private async loadRecentTurns(threadId: string): Promise<AppServerTurn[]> {
     const response = await this.transport.request<AppServerThreadTurnsListResponse>('thread/turns/list', {
       threadId,
@@ -1062,25 +1276,84 @@ export class CodexAppServerChat {
         }
         state.pendingRequests.clear();
       }
-      // thread/status/changed is the only notification that should toggle isStreaming
-      // off — short-lived events like item/completed and serverRequest/resolved happen
-      // many times inside one turn, and using them to clear isStreaming makes the
-      // tablet's working badge flicker. Any active flag (running, waitingOnApproval,
-      // waitingOnUserInput) keeps the thread in a working state.
-      const shouldKeepActiveTurn = type !== 'active' && state.activeTurnId !== null;
-      state.isStreaming = type === 'active' || shouldKeepActiveTurn;
-      if (type !== 'active' && !shouldKeepActiveTurn) {
+      // thread/status/changed is the authoritative running/idle signal. Do not
+      // keep an old activeTurnId alive after Codex reports a non-active status:
+      // turn/completed can arrive later, and waiting for it leaves the phone
+      // showing "Codex is working" after the desktop has already stopped.
+      state.isStreaming = type === 'active';
+      if (type !== 'active') {
         state.activeTurnId = null;
         state.isCompacting = false;
       }
-      const visibleType = shouldKeepActiveTurn ? 'active' : type;
       this.emitLiveEvent({
         type: 'thread/status/changed',
         payload: {
           threadId,
-          status: mapAppServerStatus({ type: visibleType, activeFlags } as AppServerThreadStatus)
+          status: mapAppServerStatus({ type, activeFlags } as AppServerThreadStatus)
         }
       });
+      this.emitThreadStateChanged(threadId);
+      return;
+    }
+
+    if (notification.method === 'thread/goal/updated') {
+      const goal = mergeGoalProgress(
+        state.goal,
+        normalizeAppServerGoal(recordFromUnknown(params.goal))
+      );
+      const goalTurnId = stringField(params, 'turnId');
+      state.goal = goal;
+      this.resetGoalTokenBaseline(threadId, goal);
+      if (goal?.status === 'active' && goalTurnId) {
+        state.activeTurnId = goalTurnId;
+        state.isStreaming = true;
+        state.isCompacting = false;
+      } else if (goalTurnId && state.activeTurnId === goalTurnId) {
+        state.activeTurnId = null;
+        state.isStreaming = false;
+        state.isCompacting = false;
+      }
+      this.emitLiveEvent({
+        type: 'thread/goal/changed',
+        payload: { threadId, goal }
+      });
+      this.emitThreadStateChanged(threadId);
+      return;
+    }
+
+    if (notification.method === 'thread/goal/cleared') {
+      state.goal = null;
+      state.goalTokenBaseline = undefined;
+      this.emitLiveEvent({
+        type: 'thread/goal/changed',
+        payload: { threadId, goal: null }
+      });
+      this.emitThreadStateChanged(threadId);
+      return;
+    }
+
+    if (notification.method === 'thread/tokenUsage/updated') {
+      const tokenUsage = normalizeAppServerTokenUsage(
+        params.tokenUsage ?? params.token_usage
+      );
+      if (!tokenUsage) {
+        return;
+      }
+      state.usage = tokenUsage.usage;
+      if (tokenUsage.tokensUsed !== undefined) {
+        state.tokenUsageTotal = tokenUsage.tokensUsed;
+      }
+      if (state.goal && tokenUsage.tokensUsed !== undefined) {
+        const goalTokensUsed = goalTokensUsedFromTotal(state, tokenUsage.tokensUsed);
+        const nextGoal = goalWithTokensUsed(state.goal, goalTokensUsed);
+        if (nextGoal !== state.goal) {
+          state.goal = nextGoal;
+          this.emitLiveEvent({
+            type: 'thread/goal/changed',
+            payload: { threadId, goal: nextGoal }
+          });
+        }
+      }
       this.emitThreadStateChanged(threadId);
       return;
     }
@@ -1268,24 +1541,25 @@ export class CodexAppServerChat {
     const state = this.stateForThread(threadId);
     const turnId = stringField(params, 'turnId') ?? state.activeTurnId ?? appServerLiveTurnId(threadId);
     const text = planTextFromUpdatedNotification(params);
-    if (!text) {
+    const planItems = planItemsFromUpdatedNotification(params);
+    if (!text && planItems.length === 0) {
       this.emitLiveStateChange(threadId);
       return;
     }
 
     state.activeTurnId = turnId;
     state.isStreaming = true;
-    state.liveMessages.set(
-      `plan:${turnId}`,
-      ChatMessageSchema.parse({
-        id: `plan:${turnId}`,
-        role: 'activity',
-        kind: 'plan',
-        text,
-        turnId,
-        createdAt: new Date().toISOString()
-      })
-    );
+    const planMessage = ChatMessageSchema.parse({
+      id: `plan:${turnId}`,
+      role: 'activity',
+      kind: 'plan',
+      text,
+      ...(planItems.length > 0 ? { planItems } : {}),
+      turnId,
+      createdAt: new Date().toISOString()
+    });
+    state.liveMessages.set(`plan:${turnId}`, planMessage);
+    state.retainedPlanMessages.set(turnId, planMessage);
     this.emitThreadStateChanged(threadId);
   }
 
@@ -1310,6 +1584,7 @@ export class CodexAppServerChat {
       isCompacting: false,
       pendingRequests: new Map(),
       liveMessages: new Map(),
+      retainedPlanMessages: new Map(),
       lastStreaming: false
     };
     this.liveThreads.set(threadId, created);
@@ -1403,7 +1678,7 @@ function mapAppServerStatus(status: AppServerThreadStatus | undefined): Thread['
       // waiting_approval so the tablet shows the attention badge and disables the
       // composer, matching what sendStateForThread already does for the transcript
       // path. waitingOnUserInput means Codex needs the user to answer something on
-      // the Mac (e.g. an MCP elicitation), waitingOnApproval means it needs an
+      // the helper computer (e.g. an MCP elicitation), waitingOnApproval means it needs an
       // approval click for a tool/file/permission change.
       return status.activeFlags.includes('waitingOnApproval') ||
         status.activeFlags.includes('waitingOnUserInput')
@@ -1497,6 +1772,66 @@ function transcriptConfirmsLiveMessage(liveMessage: ChatMessage, transcriptMessa
   });
 }
 
+function transcriptWithRetainedPlanMessages(
+  transcript: ThreadTranscript,
+  retainedPlanMessages: Map<string, ChatMessage>
+): ThreadTranscript {
+  const plans = [...retainedPlanMessages.values()]
+    .filter((plan) => !transcriptConfirmsPlanMessage(plan, transcript.messages))
+    .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+  if (plans.length === 0) {
+    return transcript;
+  }
+
+  const messages = [...transcript.messages];
+  for (const plan of plans) {
+    messages.splice(retainedPlanInsertionIndex(messages, plan), 0, plan);
+  }
+  return ThreadTranscriptSchema.parse({
+    ...transcript,
+    messages
+  });
+}
+
+function transcriptConfirmsPlanMessage(plan: ChatMessage, messages: ChatMessage[]): boolean {
+  return messages.some((message) => {
+    if (message.id === plan.id) {
+      return true;
+    }
+    return Boolean(plan.turnId && message.kind === 'plan' && message.turnId === plan.turnId);
+  });
+}
+
+function retainedPlanInsertionIndex(messages: ChatMessage[], plan: ChatMessage): number {
+  if (plan.turnId) {
+    const firstNonUserIndex = messages.findIndex(
+      (message) => message.turnId === plan.turnId && !(message.role === 'user' && message.kind === 'message')
+    );
+    if (firstNonUserIndex >= 0) {
+      return firstNonUserIndex;
+    }
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]?.turnId === plan.turnId) {
+        return index + 1;
+      }
+    }
+  }
+
+  const planCreatedAt = Date.parse(plan.createdAt);
+  if (Number.isFinite(planCreatedAt)) {
+    const laterMessageIndex = messages.findIndex((message) => {
+      const messageCreatedAt = Date.parse(message.createdAt);
+      return Number.isFinite(messageCreatedAt) && messageCreatedAt > planCreatedAt;
+    });
+    if (laterMessageIndex >= 0) {
+      return laterMessageIndex;
+    }
+  }
+
+  return messages.length;
+}
+
 function userTextInput(text: string, attachments: ChatAttachment[] = []) {
   const input: Record<string, unknown>[] = [];
   if (text.trim()) {
@@ -1511,7 +1846,7 @@ function userTextInput(text: string, attachments: ChatAttachment[] = []) {
       continue;
     }
     input.push({
-      type: 'input_image',
+      type: 'image',
       image_url: {
         url: attachment.url
       }
@@ -1535,7 +1870,11 @@ function turnStartOverrides(
 ): Record<string, unknown> {
   const model = options.model?.trim() || stringFieldFromMaybe(thread?.model) || 'gpt-5.5';
   const effort = options.effort?.trim() || stringFieldFromMaybe(thread?.reasoningEffort) || null;
-  const settings = thread ? executionSettingsFromThread(thread) : fallbackSettings;
+  const settings = options.permissionMode
+    ? executionSettingsForPermissionMode(options.permissionMode, thread?.cwd ?? fallbackSettings.cwd)
+    : thread
+      ? executionSettingsFromThread(thread)
+      : fallbackSettings;
   return {
     ...(options.model ? { model: options.model } : {}),
     ...(options.effort ? { effort: options.effort } : {}),
@@ -1552,7 +1891,9 @@ function executionSettingsFromThread(thread: AppServerThread): AppServerThreadEx
     approvalsReviewer: thread.approvalsReviewer,
     permissionProfile: thread.permissionProfile,
     sandboxPolicy: thread.sandboxPolicy,
-    serviceTier: thread.serviceTier
+    cwd: thread.cwd,
+    serviceTier: thread.serviceTier,
+    collaborationMode: thread.collaborationMode
   };
 }
 
@@ -1569,7 +1910,8 @@ function executionSettingsFromThreadResponse(
     ...(valueIsPresent(response.permissionProfile)
       ? { permissionProfile: response.permissionProfile }
       : {}),
-    ...(valueIsPresent(response.permissionProfile) ? {} : sandboxPolicyOverride(response.sandbox)),
+    ...sandboxPolicyOverride(response.sandbox),
+    ...(typeof response.thread?.cwd === 'string' ? { cwd: response.thread.cwd } : {}),
     ...(valueIsPresent(response.serviceTier) ? { serviceTier: response.serviceTier } : {})
   };
 }
@@ -1624,6 +1966,79 @@ function sandboxPolicyFromUnknown(sandbox: unknown): unknown {
   }
 }
 
+function sandboxFromPermissionMode(
+  mode: SelectableCodexPermissionModeId | undefined
+): AppServerThreadStartParams['sandbox'] | undefined {
+  switch (mode) {
+    case 'fullAccess':
+      return 'danger-full-access';
+    case 'autoReview':
+      return 'workspace-write';
+    case 'default':
+    default:
+      return undefined;
+  }
+}
+
+function approvalPolicyFromPermissionMode(
+  mode: SelectableCodexPermissionModeId | undefined
+): unknown {
+  switch (mode) {
+    case 'fullAccess':
+      return 'never';
+    case 'autoReview':
+      return 'on-request';
+    case 'default':
+    default:
+      return undefined;
+  }
+}
+
+function approvalsReviewerFromPermissionMode(
+  mode: SelectableCodexPermissionModeId | undefined
+): AppServerThreadStartParams['approvalsReviewer'] | undefined {
+  switch (mode) {
+    case 'autoReview':
+      return 'auto_review';
+    case 'fullAccess':
+      return 'user';
+    case 'default':
+    default:
+      return undefined;
+  }
+}
+
+function executionSettingsForPermissionMode(
+  mode: SelectableCodexPermissionModeId,
+  cwd?: string
+): AppServerThreadExecutionSettings {
+  return {
+    approvalPolicy: mode === 'default' ? 'on-request' : approvalPolicyFromPermissionMode(mode),
+    approvalsReviewer: mode === 'default' ? 'user' : approvalsReviewerFromPermissionMode(mode),
+    sandboxPolicy: sandboxPolicyForPermissionMode(mode, cwd),
+    ...(cwd ? { cwd } : {})
+  };
+}
+
+function sandboxPolicyForPermissionMode(
+  mode: SelectableCodexPermissionModeId,
+  cwd?: string
+): unknown {
+  switch (mode) {
+    case 'fullAccess':
+      return { type: 'dangerFullAccess' };
+    case 'default':
+    case 'autoReview':
+      return {
+        type: 'workspaceWrite',
+        writableRoots: cwd ? [cwd] : [],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false
+      };
+  }
+}
+
 function valueIsPresent(value: unknown): boolean {
   return value !== undefined && value !== null;
 }
@@ -1654,29 +2069,55 @@ function planTextFromUpdatedNotification(params: Record<string, unknown>): strin
     lines.push(explanation);
   }
 
-  const planLines = arrayField(params, 'plan')
-    .map((entry) => recordFromUnknown(entry))
+  const planLines = planItemsFromUpdatedNotification(params)
     .map((entry) => {
-      const step = stringField(entry, 'step');
-      if (!step) {
-        return undefined;
-      }
-      const status = stringField(entry, 'status') ?? 'pending';
       const marker =
-        status === 'completed'
+        entry.status === 'completed'
           ? 'x'
-          : status === 'inProgress' || status === 'in_progress'
+          : entry.status === 'in_progress'
             ? '*'
             : ' ';
-      return `[${marker}] ${step}`;
-    })
-    .filter((line): line is string => Boolean(line));
+      return `[${marker}] ${entry.step}`;
+    });
 
   if (lines.length > 0 && planLines.length > 0) {
     lines.push('');
   }
   lines.push(...planLines);
   return lines.join('\n').trim();
+}
+
+function planItemsFromUpdatedNotification(params: Record<string, unknown>): ThreadPlanItem[] {
+  return planItemsFromUnknown(arrayField(params, 'plan'));
+}
+
+function planItemsFromUnknown(value: unknown): ThreadPlanItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((entry) => {
+    const record = recordFromUnknown(entry);
+    const step = stringField(record, 'step');
+    if (!step) {
+      return [];
+    }
+    return [
+      ThreadPlanItemSchema.parse({
+        step,
+        status: normalizePlanItemStatus(stringField(record, 'status'))
+      })
+    ];
+  });
+}
+
+function normalizePlanItemStatus(status: string | undefined): ThreadPlanItem['status'] {
+  if (status === 'completed') {
+    return 'completed';
+  }
+  if (status === 'inProgress' || status === 'in_progress') {
+    return 'in_progress';
+  }
+  return 'pending';
 }
 
 function sandboxFromConfig(config: Record<string, unknown>): AppServerThreadStartParams['sandbox'] {
@@ -1713,6 +2154,20 @@ function approvalPolicyFromConfig(
   return sandbox === 'danger-full-access' ? 'never' : 'on-request';
 }
 
+function approvalsReviewerFromConfig(
+  config: Record<string, unknown>
+): AppServerThreadStartParams['approvalsReviewer'] {
+  const raw = stringField(config, 'approvals_reviewer');
+  switch (raw) {
+    case 'auto_review':
+    case 'guardian_subagent':
+      return raw;
+    case 'user':
+    default:
+      return 'user';
+  }
+}
+
 function threadStartConfigFromCodexConfig(config: Record<string, unknown>): Record<string, unknown> {
   const threadConfig: Record<string, unknown> = {};
   const reasoningEffort = stringField(config, 'model_reasoning_effort');
@@ -1741,6 +2196,456 @@ function appServerActiveTurnId(threadId: string): string {
   return `${APP_SERVER_ACTIVE_TURN_PREFIX}${threadId}`;
 }
 
+type RolloutQuestion = {
+  id: string;
+  header?: string;
+  question: string;
+};
+
+type RolloutQuestionCall = {
+  callId: string;
+  turnId?: string;
+  createdAt: string;
+  questions: RolloutQuestion[];
+  output?: unknown;
+};
+
+type RolloutImageCall = {
+  callId: string;
+  name?: string;
+  turnId?: string;
+  createdAt: string;
+  attachments: ChatAttachment[];
+};
+
+type RolloutTranscriptContext = {
+  collaborationMode?: CollaborationModeKind;
+  questionMessages: ChatMessage[];
+  attachmentMessages: ChatMessage[];
+};
+
+function rolloutTranscriptContextFromLines(lines: string[]): RolloutTranscriptContext {
+  const calls = new Map<string, RolloutQuestionCall>();
+  const imageCalls = new Map<string, RolloutImageCall>();
+  const toolCalls = new Map<string, { name?: string; turnId?: string; createdAt: string }>();
+  let currentTurnId: string | undefined;
+  let collaborationMode: CollaborationModeKind | undefined;
+
+  for (const line of lines) {
+    const event = parseRolloutJsonLine(line);
+    if (!event) {
+      continue;
+    }
+
+    if (event.type === 'turn_context') {
+      const payload = recordFromUnknown(event.payload);
+      currentTurnId = stringField(payload ?? {}, 'turn_id') ?? currentTurnId;
+      const rawMode = stringField(recordFromUnknown(payload?.collaboration_mode) ?? {}, 'mode');
+      if (rawMode === 'plan' || rawMode === 'default') {
+        collaborationMode = rawMode;
+      }
+      continue;
+    }
+
+    if (event.type !== 'response_item') {
+      continue;
+    }
+
+    const payload = recordFromUnknown(event.payload);
+    const payloadType = stringField(payload ?? {}, 'type');
+    if (payloadType === 'function_call') {
+      const name = stringField(payload ?? {}, 'name');
+      const callId = stringField(payload ?? {}, 'call_id');
+      if (callId) {
+        toolCalls.set(callId, {
+          ...(name ? { name } : {}),
+          ...(currentTurnId ? { turnId: currentTurnId } : {}),
+          createdAt: timestampFromRolloutEvent(event)
+        });
+      }
+      if (name === 'request_user_input') {
+        const questions = requestUserInputQuestionsFromArguments(stringField(payload ?? {}, 'arguments'));
+        if (callId && questions.length > 0) {
+          calls.set(callId, {
+            callId,
+            ...(currentTurnId ? { turnId: currentTurnId } : {}),
+            createdAt: timestampFromRolloutEvent(event),
+            questions
+          });
+        }
+        continue;
+      }
+
+      if (callId) {
+        const attachments = rolloutImageAttachmentsFromCallArguments(
+          name,
+          parseJsonMaybe(stringField(payload ?? {}, 'arguments')),
+          `codex-rollout-image:${callId}:args`
+        );
+        if (attachments.length > 0 || isRolloutImageToolName(name)) {
+          imageCalls.set(callId, {
+            callId,
+            ...(name ? { name } : {}),
+            ...(currentTurnId ? { turnId: currentTurnId } : {}),
+            createdAt: timestampFromRolloutEvent(event),
+            attachments
+          });
+        }
+      }
+      continue;
+    }
+
+    if (payloadType === 'function_call_output') {
+      const callId = stringField(payload ?? {}, 'call_id');
+      const output = parseJsonMaybe(stringField(payload ?? {}, 'output'));
+      const call = callId ? calls.get(callId) : undefined;
+      if (call) {
+        call.output = output;
+      }
+
+      if (callId) {
+        const outputAttachments = imageAttachmentsFromUnknown(
+          output,
+          `codex-rollout-image:${callId}:output`,
+          'Tool screenshot'
+        );
+        if (outputAttachments.length > 0) {
+          const existing = imageCalls.get(callId);
+          const toolCall = toolCalls.get(callId);
+          imageCalls.set(callId, {
+            callId,
+            ...(existing?.name ?? toolCall?.name ? { name: existing?.name ?? toolCall?.name } : {}),
+            ...(existing?.turnId ?? toolCall?.turnId ?? currentTurnId
+              ? { turnId: existing?.turnId ?? toolCall?.turnId ?? currentTurnId }
+              : {}),
+            createdAt: timestampFromRolloutEvent(event),
+            attachments: mergeRolloutAttachments(existing?.attachments ?? [], outputAttachments)
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    ...(collaborationMode ? { collaborationMode } : {}),
+    questionMessages: [...calls.values()].map(questionCallMessage),
+    attachmentMessages: [...imageCalls.values()]
+      .filter((call) => call.attachments.length > 0)
+      .map(rolloutImageCallMessage)
+  };
+}
+
+function applyRolloutContextToTranscript(
+  transcript: ThreadTranscript,
+  context: RolloutTranscriptContext
+): ThreadTranscript {
+  const withImages = mergeRolloutAttachmentMessagesIntoTranscript(transcript.messages, context.attachmentMessages);
+  const withQuestions = mergeQuestionMessagesIntoTranscript(withImages, context.questionMessages);
+  return ThreadTranscriptSchema.parse({
+    ...transcript,
+    ...(context.collaborationMode ? { collaborationMode: context.collaborationMode } : {}),
+    messages: withQuestions
+  });
+}
+
+function mergeQuestionMessagesIntoTranscript(
+  messages: ChatMessage[],
+  questionMessages: ChatMessage[]
+): ChatMessage[] {
+  const existingIds = new Set(messages.map((message) => message.id));
+  const extras = questionMessages.filter((message) => !existingIds.has(message.id));
+  if (extras.length === 0) {
+    return messages;
+  }
+
+  const extrasByTurn = new Map<string, ChatMessage[]>();
+  const extrasWithoutTurn: ChatMessage[] = [];
+  for (const extra of extras) {
+    if (extra.turnId) {
+      extrasByTurn.set(extra.turnId, [...(extrasByTurn.get(extra.turnId) ?? []), extra]);
+    } else {
+      extrasWithoutTurn.push(extra);
+    }
+  }
+
+  const result: ChatMessage[] = [];
+  const insertedTurns = new Set<string>();
+  for (const message of messages) {
+    const turnExtras = message.turnId ? extrasByTurn.get(message.turnId) : undefined;
+    if (turnExtras && !insertedTurns.has(message.turnId!) && message.kind === 'plan') {
+      result.push(...turnExtras);
+      insertedTurns.add(message.turnId!);
+    }
+    result.push(message);
+  }
+
+  for (const [turnId, turnExtras] of extrasByTurn.entries()) {
+    if (!insertedTurns.has(turnId)) {
+      result.push(...turnExtras);
+    }
+  }
+  result.push(...extrasWithoutTurn);
+  return result;
+}
+
+function mergeRolloutAttachmentMessagesIntoTranscript(
+  messages: ChatMessage[],
+  attachmentMessages: ChatMessage[]
+): ChatMessage[] {
+  const existingIds = new Set(messages.map((message) => message.id));
+  const extras = attachmentMessages.filter((message) => !existingIds.has(message.id));
+  if (extras.length === 0) {
+    return messages;
+  }
+
+  const extrasByTurn = new Map<string, ChatMessage[]>();
+  const extrasWithoutTurn: ChatMessage[] = [];
+  for (const extra of extras) {
+    if (extra.turnId) {
+      extrasByTurn.set(extra.turnId, [...(extrasByTurn.get(extra.turnId) ?? []), extra]);
+    } else {
+      extrasWithoutTurn.push(extra);
+    }
+  }
+
+  const result: ChatMessage[] = [];
+  const insertedTurns = new Set<string>();
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]!;
+    const turnId = message.turnId ?? undefined;
+    const turnExtras = turnId ? extrasByTurn.get(turnId) : undefined;
+    if (turnId && turnExtras && !insertedTurns.has(turnId) && shouldInsertRolloutAttachmentsBefore(message)) {
+      result.push(...turnExtras);
+      insertedTurns.add(turnId);
+    }
+    result.push(message);
+    const nextTurnId = messages[index + 1]?.turnId ?? undefined;
+    if (turnId && turnExtras && !insertedTurns.has(turnId) && nextTurnId !== turnId) {
+      result.push(...turnExtras);
+      insertedTurns.add(turnId);
+    }
+  }
+
+  for (const [turnId, turnExtras] of extrasByTurn.entries()) {
+    if (!insertedTurns.has(turnId)) {
+      result.push(...turnExtras);
+    }
+  }
+  result.push(...extrasWithoutTurn);
+  return result;
+}
+
+function shouldInsertRolloutAttachmentsBefore(message: ChatMessage): boolean {
+  return message.role === 'assistant' && message.kind === 'message' && message.phase !== 'commentary';
+}
+
+function appendUserInputRequestMessages(
+  messages: ChatMessage[],
+  requests: PendingApprovalRequest[]
+): ChatMessage[] {
+  const questionMessages = requests
+    .filter(isUserInputRequest)
+    .map((request) => pendingUserInputRequestMessage(request));
+  return mergeQuestionMessagesIntoTranscript(messages, questionMessages);
+}
+
+function pendingUserInputRequestMessage(request: PendingApprovalRequest): ChatMessage {
+  const params = request.params ?? {};
+  const questions = requestUserInputQuestionsFromUnknown(params);
+  return ChatMessageSchema.parse({
+    id: `codex-user-input:${userInputCallIdForRequest(request)}`,
+    role: 'activity',
+    kind: 'status',
+    phase: 'user_input',
+    text: questionSummaryText(questions, undefined),
+    ...(request.turnId ? { turnId: request.turnId } : {}),
+    createdAt: new Date().toISOString()
+  });
+}
+
+function questionCallMessage(call: RolloutQuestionCall): ChatMessage {
+  return ChatMessageSchema.parse({
+    id: `codex-user-input:${call.callId}`,
+    role: 'activity',
+    kind: 'status',
+    phase: 'user_input',
+    text: questionSummaryText(call.questions, call.output),
+    ...(call.turnId ? { turnId: call.turnId } : {}),
+    createdAt: call.createdAt
+  });
+}
+
+function rolloutImageCallMessage(call: RolloutImageCall): ChatMessage {
+  return ChatMessageSchema.parse({
+    id: `codex-rollout-image:${call.callId}`,
+    role: 'activity',
+    kind: 'tool',
+    phase: 'screenshot',
+    text: rolloutImageCallText(call.name),
+    ...(call.turnId ? { turnId: call.turnId } : {}),
+    createdAt: call.createdAt,
+    attachments: call.attachments
+  });
+}
+
+function rolloutImageCallText(name: string | undefined): string {
+  if (!name) {
+    return 'Tool returned screenshot';
+  }
+  if (name === 'view_image') {
+    return 'Viewed screenshot';
+  }
+  if (name.toLowerCase().includes('screenshot')) {
+    return 'Captured screenshot';
+  }
+  return `${name} returned image`;
+}
+
+function rolloutImageAttachmentsFromCallArguments(
+  name: string | undefined,
+  argumentsValue: unknown,
+  ownerId: string
+): ChatAttachment[] {
+  const attachments = imageAttachmentsFromUnknown(argumentsValue, ownerId, 'Tool screenshot');
+  const argumentRecord = recordFromUnknown(argumentsValue);
+  const sourcePath =
+    stringField(argumentRecord, 'path') ??
+    stringField(argumentRecord, 'filePath') ??
+    stringField(argumentRecord, 'filepath');
+
+  if (sourcePath && (isRolloutImageToolName(name) || looksLikeImagePath(sourcePath))) {
+    return mergeRolloutAttachments(attachments, [
+      {
+        id: `${ownerId}-local-image-1`,
+        kind: 'image',
+        url: `agent-pulse-local-image:${ownerId}-local-image-1`,
+        alt: 'Tool screenshot',
+        sourcePath
+      }
+    ]);
+  }
+
+  return attachments;
+}
+
+function isRolloutImageToolName(name: string | undefined): boolean {
+  const normalized = name?.toLowerCase() ?? '';
+  return (
+    normalized === 'view_image' ||
+    normalized.includes('screenshot') ||
+    normalized.includes('image')
+  );
+}
+
+function looksLikeImagePath(value: string): boolean {
+  return /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.test(value);
+}
+
+function mergeRolloutAttachments(existing: ChatAttachment[], incoming: ChatAttachment[]): ChatAttachment[] {
+  const merged: ChatAttachment[] = [...existing];
+  for (const attachment of incoming) {
+    const key = attachment.sourcePath ?? attachment.url;
+    if (!key) {
+      continue;
+    }
+    if (merged.some((candidate) => (candidate.sourcePath ?? candidate.url) === key)) {
+      continue;
+    }
+    merged.push(attachment);
+  }
+  return merged;
+}
+
+function questionSummaryText(questions: RolloutQuestion[], output: unknown): string {
+  const count = questions.length || 1;
+  const lines = [`Asked ${count} question${count === 1 ? '' : 's'}`];
+  for (const question of questions.length > 0 ? questions : [{ id: 'question', question: 'Question' }]) {
+    const answer = answerTextForQuestion(output, question.id);
+    if (count === 1) {
+      lines.push(question.question);
+      lines.push(answer ? `Answer: ${answer}` : 'Waiting for answer');
+    } else {
+      const label = question.header || question.question;
+      lines.push(`${label}: ${answer ?? 'Waiting for answer'}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function answerTextForQuestion(output: unknown, questionId: string): string | undefined {
+  const answers = recordFromUnknown(recordFromUnknown(output)?.answers);
+  const value = answers?.[questionId];
+  const answerRecord = recordFromUnknown(value);
+  const answerList = arrayField(answerRecord ?? {}, 'answers')
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+  if (answerList.length > 0) {
+    return answerList.join(', ');
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  return undefined;
+}
+
+function requestUserInputQuestionsFromArguments(raw: string | undefined): RolloutQuestion[] {
+  return requestUserInputQuestionsFromUnknown(parseJsonMaybe(raw));
+}
+
+function requestUserInputQuestionsFromUnknown(value: unknown): RolloutQuestion[] {
+  const record = recordFromUnknown(value);
+  return arrayField(record ?? {}, 'questions')
+    .map((question): RolloutQuestion | undefined => {
+      const candidate = recordFromUnknown(question);
+      const id = stringField(candidate ?? {}, 'id');
+      const questionText = stringField(candidate ?? {}, 'question');
+      if (!id || !questionText) {
+        return undefined;
+      }
+      return {
+        id,
+        question: questionText,
+        ...(stringField(candidate ?? {}, 'header') ? { header: stringField(candidate ?? {}, 'header') } : {})
+      };
+    })
+    .filter((question): question is RolloutQuestion => Boolean(question));
+}
+
+function userInputCallIdForRequest(request: PendingApprovalRequest): string {
+  const params = request.params ?? {};
+  return (
+    stringField(params, 'callId') ??
+    stringField(params, 'call_id') ??
+    request.itemId ??
+    request.id
+  );
+}
+
+type RolloutJsonEvent = {
+  timestamp?: string;
+  type?: string;
+  payload?: unknown;
+};
+
+function parseRolloutJsonLine(line: string): RolloutJsonEvent | undefined {
+  return recordFromUnknown(parseJsonMaybe(line)) as RolloutJsonEvent | undefined;
+}
+
+function timestampFromRolloutEvent(event: RolloutJsonEvent): string {
+  const timestamp = typeof event.timestamp === 'string' ? event.timestamp : undefined;
+  return timestamp && !Number.isNaN(Date.parse(timestamp)) ? timestamp : new Date().toISOString();
+}
+
+function parseJsonMaybe(raw: string | undefined): unknown {
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 function mapThreadToTranscript(
   thread: AppServerThread,
   options: TranscriptMapOptions = {}
@@ -1757,6 +2662,8 @@ function mapThreadToTranscript(
     typeof thread.reasoningEffort === 'string' && thread.reasoningEffort.trim()
       ? thread.reasoningEffort.trim()
       : undefined;
+  const permissionMode = permissionModeFromExecutionSettings(executionSettingsFromThread(thread));
+  const collaborationMode = collaborationModeFromExecutionSettings(executionSettingsFromThread(thread));
 
   return ThreadTranscriptSchema.parse({
     threadId: thread.id,
@@ -1766,8 +2673,110 @@ function mapThreadToTranscript(
     sendState,
     messages,
     ...(model ? { model } : {}),
-    ...(reasoningEffort ? { reasoningEffort } : {})
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+    ...(collaborationMode ? { collaborationMode } : {}),
+    ...(permissionMode ? { permissionMode } : {})
   });
+}
+
+function collaborationModeFromExecutionSettings(
+  settings: AppServerThreadExecutionSettings
+): CollaborationModeKind | undefined {
+  return settings.collaborationMode === 'plan' || settings.collaborationMode === 'default'
+    ? settings.collaborationMode
+    : undefined;
+}
+
+function permissionModeFromExecutionSettings(
+  settings: AppServerThreadExecutionSettings
+): CodexPermissionMode | undefined {
+  if (
+    !valueIsPresent(settings.approvalPolicy) &&
+    !valueIsPresent(settings.approvalsReviewer) &&
+    !valueIsPresent(settings.sandboxPolicy) &&
+    !valueIsPresent(settings.permissionProfile)
+  ) {
+    return undefined;
+  }
+  const approvalPolicy =
+    typeof settings.approvalPolicy === 'string' ? settings.approvalPolicy : undefined;
+  const sandboxMode = sandboxModeFromSettings(settings);
+  const mode =
+    sandboxMode === 'danger-full-access' && approvalPolicy === 'never'
+      ? 'fullAccess'
+      : settings.approvalsReviewer === 'auto_review'
+        ? 'autoReview'
+        : sandboxMode === 'read-only' && approvalPolicy !== 'never'
+          ? 'sandbox'
+          : sandboxMode === 'workspace-write' && approvalPolicy !== 'never'
+            ? 'default'
+            : 'custom';
+  return CodexPermissionModeSchema.parse({
+    mode,
+    label: codexPermissionModeLabel(mode),
+    ...(valueIsPresent(settings.approvalPolicy)
+      ? { approvalPolicy: settings.approvalPolicy }
+      : {}),
+    ...(valueIsPresent(settings.approvalsReviewer)
+      ? { approvalsReviewer: settings.approvalsReviewer }
+      : {}),
+    ...(sandboxMode ? { sandboxMode } : {}),
+    ...(recordFromUnknown(settings.sandboxPolicy)
+      ? { sandboxPolicy: recordFromUnknown(settings.sandboxPolicy) }
+      : {})
+  });
+}
+
+function sandboxModeFromSettings(
+  settings: AppServerThreadExecutionSettings
+): 'read-only' | 'workspace-write' | 'danger-full-access' | undefined {
+  const profile = recordFromUnknown(settings.permissionProfile);
+  if (stringField(profile ?? {}, 'type') === 'disabled') {
+    return 'danger-full-access';
+  }
+  return sandboxModeFromPolicy(settings.sandboxPolicy);
+}
+
+function sandboxModeFromPolicy(
+  sandboxPolicy: unknown
+): 'read-only' | 'workspace-write' | 'danger-full-access' | undefined {
+  if (typeof sandboxPolicy === 'string') {
+    return sandboxFromConfig({ sandbox_mode: sandboxPolicy });
+  }
+  const policy = recordFromUnknown(sandboxPolicy);
+  if (!policy) {
+    return undefined;
+  }
+  switch (stringField(policy, 'type')) {
+    case 'dangerFullAccess':
+    case 'danger-full-access':
+      return 'danger-full-access';
+    case 'readOnly':
+    case 'read-only':
+      return 'read-only';
+    case 'workspaceWrite':
+    case 'workspace-write':
+      return 'workspace-write';
+    default:
+      return undefined;
+  }
+}
+
+function codexPermissionModeLabel(mode: CodexPermissionMode['mode']): string {
+  switch (mode) {
+    case 'fullAccess':
+      return 'Full access';
+    case 'autoReview':
+      return 'Auto-review';
+    case 'default':
+      return 'Default permission';
+    case 'sandbox':
+      return 'Read-only';
+    case 'custom':
+      return 'Custom';
+    default:
+      return 'Custom';
+  }
 }
 
 function sendStateForThread(thread: AppServerThread, activeTurn: AppServerTurn | null): ThreadSendState {
@@ -1784,7 +2793,7 @@ function sendStateForThread(thread: AppServerThread, activeTurn: AppServerTurn |
       return {
         canSend: false,
         reason: 'waiting_on_approval',
-        label: 'Approve on Mac to continue.'
+        label: 'Approve in Codex to continue.'
       };
     }
 
@@ -1792,7 +2801,7 @@ function sendStateForThread(thread: AppServerThread, activeTurn: AppServerTurn |
       return {
         canSend: false,
         reason: 'waiting_on_user_input',
-        label: 'Codex needs input on the Mac.'
+        label: 'Codex needs input on the helper computer.'
       };
     }
 
@@ -1858,11 +2867,13 @@ function mapTurnMessages(turn: AppServerTurn): ChatMessage[] {
       }
 
       if (item.type === 'plan') {
+        const planItems = planItemsFromUnknown(item.plan);
         return {
           id: item.id,
           role: 'activity',
           kind: 'plan',
           text: item.text,
+          ...(planItems.length > 0 ? { planItems } : {}),
           turnId: turn.id,
           createdAt
         };
@@ -1958,11 +2969,13 @@ function messageFromAppServerItem(
   }
 
   if (type === 'plan') {
+    const planItems = planItemsFromUnknown(item.plan);
     return ChatMessageSchema.parse({
       id,
       role: 'activity',
       kind: 'plan',
       text: stringField(item, 'text') ?? '',
+      ...(planItems.length > 0 ? { planItems } : {}),
       ...(turnId ? { turnId } : {}),
       createdAt
     });
@@ -2075,6 +3088,10 @@ function approvalResponseForServerRequest(
   return response;
 }
 
+function isUserInputRequest(request: PendingApprovalRequest): boolean {
+  return request.method === 'item/tool/requestUserInput' || request.method === 'tool/requestUserInput';
+}
+
 function reviewDecisionResponseForAppServerApproval(response: unknown): unknown {
   if (response && typeof response === 'object' && !Array.isArray(response)) {
     if ('decision' in response) {
@@ -2178,7 +3195,8 @@ function imageAttachmentsFromUnknown(value: unknown, ownerId: string, fallbackAl
 function imageUrlFromRecord(record: Record<string, unknown>): { url?: string; sourcePath?: string } | undefined {
   const type = stringField(record, 'type')?.toLowerCase() ?? '';
   const mime = stringField(record, 'mime_type') ?? stringField(record, 'mimeType') ?? stringField(record, 'media_type');
-  const isImageLike = type.includes('image') || Boolean(mime?.startsWith('image/')) || 'image_url' in record;
+  const normalizedMime = mime?.toLowerCase();
+  const isImageLike = type.includes('image') || Boolean(normalizedMime?.startsWith('image/')) || 'image_url' in record;
 
   if (type === 'localimage') {
     const sourcePath = stringField(record, 'path') ?? stringField(record, 'filePath');
@@ -2215,8 +3233,9 @@ function imageFromString(value: string | undefined, mime?: string): { url: strin
     return { url: value };
   }
 
-  if (mime?.startsWith('image/') && /^[A-Za-z0-9+/=\s]+$/.test(value)) {
-    return { url: `data:${mime};base64,${value.replace(/\s+/g, '')}` };
+  const normalizedMime = mime?.toLowerCase();
+  if (normalizedMime?.startsWith('image/') && /^[A-Za-z0-9+/=\s]+$/.test(value)) {
+    return { url: `data:${normalizedMime};base64,${value.replace(/\s+/g, '')}` };
   }
 
   return undefined;
@@ -2249,6 +3268,185 @@ function recordFromUnknown(value: unknown): Record<string, unknown> {
 function stringField(record: Record<string, unknown>, field: string): string | undefined {
   const value = record[field];
   return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function numberField(record: Record<string, unknown> | undefined, field: string): number | undefined {
+  if (!record) {
+    return undefined;
+  }
+  const value = record[field];
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function transcriptWithLiveProgress(
+  transcript: ThreadTranscript,
+  state: AppServerLiveThreadState
+): ThreadTranscript {
+  if (state.goal === undefined && !state.usage) {
+    return transcript;
+  }
+
+  return ThreadTranscriptSchema.parse({
+    ...transcript,
+    ...(state.goal !== undefined ? { goal: state.goal } : {}),
+    ...(state.usage ? { usage: state.usage } : {})
+  });
+}
+
+function normalizeAppServerGoal(goal: AppServerThreadGoal | null | undefined): ThreadGoal | null {
+  if (!goal || typeof goal !== 'object') {
+    return null;
+  }
+
+  const rawStatus = String(goal.status ?? '').trim();
+  const status =
+    rawStatus === 'budget_limited'
+      ? 'budgetLimited'
+      : rawStatus === 'active' ||
+          rawStatus === 'paused' ||
+          rawStatus === 'budgetLimited' ||
+          rawStatus === 'complete'
+        ? rawStatus
+        : 'active';
+  const threadId = goal.threadId ?? goal.thread_id;
+  const objective = goal.objective?.trim();
+  if (!threadId || !objective) {
+    return null;
+  }
+
+  return ThreadGoalSchema.parse({
+    threadId,
+    objective,
+    status,
+    tokenBudget: goal.tokenBudget ?? goal.token_budget ?? null,
+    tokensUsed: goal.tokensUsed ?? goal.tokens_used ?? 0,
+    timeUsedSeconds: goal.timeUsedSeconds ?? goal.time_used_seconds ?? 0,
+    createdAt: goal.createdAt ?? goal.created_at ?? 0,
+    updatedAt: goal.updatedAt ?? goal.updated_at ?? 0
+  });
+}
+
+function mergeGoalProgress(
+  previous: ThreadGoal | null | undefined,
+  next: ThreadGoal | null
+): ThreadGoal | null {
+  if (!previous || !next || !isSameGoal(previous, next)) {
+    return next;
+  }
+
+  const tokensUsed = Math.max(previous.tokensUsed, next.tokensUsed);
+  const timeUsedSeconds = Math.max(previous.timeUsedSeconds, next.timeUsedSeconds);
+  if (tokensUsed === next.tokensUsed && timeUsedSeconds === next.timeUsedSeconds) {
+    return next;
+  }
+
+  return ThreadGoalSchema.parse({
+    ...next,
+    tokensUsed,
+    timeUsedSeconds
+  });
+}
+
+function isSameGoal(previous: ThreadGoal, next: ThreadGoal): boolean {
+  if (previous.threadId !== next.threadId) {
+    return false;
+  }
+  if (previous.createdAt > 0 && next.createdAt > 0) {
+    return previous.createdAt === next.createdAt;
+  }
+  return previous.objective === next.objective;
+}
+
+type NormalizedAppServerTokenUsage = {
+  usage: ThreadUsage;
+  tokensUsed?: number;
+};
+
+function normalizeAppServerTokenUsage(raw: unknown): NormalizedAppServerTokenUsage | undefined {
+  const tokenUsage = recordFromUnknown(raw);
+  if (!Object.keys(tokenUsage).length) {
+    return undefined;
+  }
+
+  const total = recordField(tokenUsage, 'total') ?? recordField(tokenUsage, 'total_token_usage');
+  const last = recordField(tokenUsage, 'last') ?? recordField(tokenUsage, 'last_token_usage');
+  const tokensUsed = tokenCountFromBreakdown(total);
+  const contextTokens = tokenCountFromBreakdown(last) ?? tokensUsed;
+  const contextWindow =
+    numberField(tokenUsage, 'modelContextWindow') ?? numberField(tokenUsage, 'model_context_window');
+  const contextUsedPercent =
+    contextTokens !== undefined && contextWindow !== undefined && contextWindow > 0
+      ? Math.min(100, Math.round((contextTokens / contextWindow) * 100))
+      : undefined;
+
+  if (tokensUsed === undefined && contextTokens === undefined && contextWindow === undefined) {
+    return undefined;
+  }
+
+  return {
+    usage: ThreadUsageSchema.parse({
+      ...(contextTokens !== undefined ? { contextTokens } : {}),
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
+      ...(contextUsedPercent !== undefined ? { contextUsedPercent } : {})
+    }),
+    ...(tokensUsed !== undefined ? { tokensUsed } : {})
+  };
+}
+
+function tokenCountFromBreakdown(record: Record<string, unknown> | undefined): number | undefined {
+  const explicit = numberField(record, 'totalTokens') ?? numberField(record, 'total_tokens');
+  if (explicit !== undefined) {
+    return Math.max(0, Math.round(explicit));
+  }
+  if (!record) {
+    return undefined;
+  }
+
+  const pieces = [
+    numberField(record, 'inputTokens') ?? numberField(record, 'input_tokens'),
+    numberField(record, 'cachedInputTokens') ?? numberField(record, 'cached_input_tokens'),
+    numberField(record, 'outputTokens') ?? numberField(record, 'output_tokens'),
+    numberField(record, 'reasoningOutputTokens') ?? numberField(record, 'reasoning_output_tokens')
+  ].filter((value): value is number => value !== undefined);
+
+  if (!pieces.length) {
+    return undefined;
+  }
+  return Math.max(0, Math.round(pieces.reduce((sum, value) => sum + value, 0)));
+}
+
+function goalWithTokensUsed(goal: ThreadGoal, tokensUsed: number): ThreadGoal {
+  const nextTokensUsed = Math.max(goal.tokensUsed, Math.max(0, Math.round(tokensUsed)));
+  if (nextTokensUsed === goal.tokensUsed) {
+    return goal;
+  }
+  return ThreadGoalSchema.parse({
+    ...goal,
+    tokensUsed: nextTokensUsed
+  });
+}
+
+function goalTokensUsedFromTotal(state: AppServerLiveThreadState, totalTokensUsed: number): number {
+  if (state.goalTokenBaseline === undefined) {
+    state.goalTokenBaseline = Math.max(0, totalTokensUsed - (state.goal?.tokensUsed ?? 0));
+  }
+  return Math.max(0, Math.round(totalTokensUsed - state.goalTokenBaseline));
+}
+
+function goalStatusToAppServer(status: ThreadGoal['status']): string {
+  return status;
+}
+
+function isGoalFeatureDisabledError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /goals feature is disabled|method not found|unknown method/i.test(message);
 }
 
 function arrayField(record: Record<string, unknown>, field: string): unknown[] {

@@ -1,9 +1,10 @@
-import { app, BrowserWindow, Menu, nativeImage, Tray } from 'electron';
+import { app, BrowserWindow, Menu, nativeImage, Tray, dialog } from 'electron';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { acquireSingleInstanceLock, SINGLE_INSTANCE_LOCK_PATH } from './single-instance';
 import { AdminAuth } from './auth/admin';
 import { DeviceRegistry, PairingManager } from './auth/pairing';
-import { KeychainDeviceStore } from './auth/keychain-store';
 import { ClaudeCodeProvider } from './claude/claude-code';
 import { CopilotProvider } from './copilot/copilot';
 import { CodexAppServerChat } from './codex/app-server-chat';
@@ -20,16 +21,37 @@ import { CloudflareTunnelSupervisor } from './server/cloudflare-tunnel';
 import { BonjourAdvertiser } from './server/mdns';
 import { SeenThreadStore } from './server/seen-thread-store';
 import { HelperSettingsStore } from './server/settings';
+import { createDefaultDeviceStore } from './auth/device-store';
+import { displayPath } from './platform/paths';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Refuse to start if another Agent Pulse window is already open. Electron's
+// built-in lock handles two app launches; the file lock below also blocks
+// against a dev-server (`pnpm start`) running in parallel.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  process.exit(0);
+}
 
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let runningServer: RunningAgentPulseServer | undefined;
 let remoteSupervisor: CloudflareTunnelSupervisor | undefined;
+let releaseSingleInstanceLock: (() => Promise<void>) | undefined;
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  } else {
+    void createWindow();
+  }
+});
 const advertiser = new BonjourAdvertiser();
 const settingsStore = new HelperSettingsStore();
-const registry = new DeviceRegistry(new KeychainDeviceStore());
+const registry = new DeviceRegistry(createDefaultDeviceStore());
 const pairing = new PairingManager(registry);
 const adminAuth = new AdminAuth({
   onPasscodeGenerated: (passcode) => {
@@ -37,7 +59,7 @@ const adminAuth = new AdminAuth({
     console.log('========================================');
     console.log('Agent Pulse admin passcode (save this):');
     console.log(`  ${passcode}`);
-    console.log('You can also re-read it from ~/Library/Application Support/Agent Pulse/admin.json (hashed only).');
+    console.log(`The hashed copy is saved at ${displayPath(settingsStorePath('admin.json'))}.`);
     console.log('========================================');
     console.log('');
   }
@@ -54,7 +76,9 @@ const usageProvider = async (threadId: string) => {
 };
 const catalog = new CatalogReader();
 catalog.start();
-const appServer = new CodexAppServerChat(new CodexAppServerClient({ version: app.getVersion() }));
+const appServer = new CodexAppServerChat(new CodexAppServerClient({ version: app.getVersion() }), {
+  rolloutLookup
+});
 const claudeCode = new ClaudeCodeProvider();
 const copilot = new CopilotProvider();
 const desktopControlDisabled = process.env.AGENT_PULSE_DISABLE_CODEX_DESKTOP === '1';
@@ -78,6 +102,10 @@ if (!desktopControlDisabled) {
 }
 
 const seenThreadStore = new SeenThreadStore();
+
+function settingsStorePath(fileName: string): string {
+  return path.join(path.dirname(SINGLE_INSTANCE_LOCK_PATH), fileName);
+}
 
 async function startOrRestartServer(): Promise<RunningAgentPulseServer> {
   await seenThreadStore.load().catch(() => undefined);
@@ -150,7 +178,10 @@ async function createWindow(): Promise<void> {
 }
 
 function createTray(): void {
-  const icon = nativeImage.createFromPath('/Applications/Codex.app/Contents/Resources/codexTemplate.png');
+  const iconPath = '/Applications/Codex.app/Contents/Resources/codexTemplate.png';
+  const icon = process.platform === 'darwin' && existsSync(iconPath)
+    ? nativeImage.createFromPath(iconPath)
+    : nativeImage.createEmpty();
   tray = new Tray(icon);
   tray.setToolTip('Agent Pulse');
   tray.setContextMenu(
@@ -171,6 +202,17 @@ function createTray(): void {
 }
 
 app.whenReady().then(async () => {
+  const lock = await acquireSingleInstanceLock();
+  if (!lock.acquired) {
+    const message =
+      `Another Agent Pulse helper is already running (pid ${lock.existingPid}).\n\n` +
+      `If this is wrong, delete the lock file and try again:\n${SINGLE_INSTANCE_LOCK_PATH}`;
+    console.error(message);
+    dialog.showErrorBox('Agent Pulse already running', message);
+    app.quit();
+    return;
+  }
+  releaseSingleInstanceLock = lock.release;
   createTray();
   await createWindow();
 });
@@ -186,4 +228,5 @@ app.on('before-quit', async () => {
   opener.dispose();
   claudeCode.dispose();
   catalog.dispose();
+  await releaseSingleInstanceLock?.();
 });

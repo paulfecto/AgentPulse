@@ -34,8 +34,11 @@ Apply it before code changes when the task needs a real execution plan with:
 4. Bound the write set to the smallest owning files or directories.
 5. Name the owning layer and any contract surfaces that will change.
 6. Write explicit acceptance criteria and a validation matrix.
-7. Call out deploy/runtime impact and open risks.
-8. Write the plan into the target repo's `docs/exec-plans/active/`.
+7. For broad, risky, architectural, release, or project-level work, mark
+   `Mission control` as required and prepare the repo for
+   `docs/exec-plans/active/mission.json` before implementation starts.
+8. Call out deploy/runtime impact and open risks.
+9. Write the plan into the target repo's `docs/exec-plans/active/`.
 
 ## Completion evidence
 
@@ -44,5 +47,6 @@ The plan is only good enough when:
 - the write set is concrete
 - acceptance is testable
 - validation is named
+- broad/risky/project work has a Mission Mode decision
 - uncertainty is either answered or recorded as an explicit assumption
 - the repo can tell what would count as completion before edits begin

@@ -17,7 +17,7 @@ Adopt the current AgentOS contract for this downstream repo before harness-manag
 
 ## Planned Install Selection
 - profile: `full`
-- enabled features: `core, consultation, browser-containerized, frontier, secondary-lanes, eval-mode, proof-orchestration, creative-workflow, developer-progress-board, diagram-design, engineering-discipline, ui-reference, termination-supervisor`
+- enabled features: `core, consultation, browser-containerized, frontier, secondary-lanes, eval-mode, proof-orchestration, termination-supervisor, creative-workflow, developer-progress-board, diagram-design, engineering-discipline, ui-reference`
 
 ## Recommendations
 - Keep AgentOS setup plan-first: answer project-specific questions before mutation.

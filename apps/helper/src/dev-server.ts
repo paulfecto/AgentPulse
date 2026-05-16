@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { acquireSingleInstanceLock, SINGLE_INSTANCE_LOCK_PATH } from './single-instance';
 import { AdminAuth } from './auth/admin';
-import { KeychainDeviceStore } from './auth/keychain-store';
 import { ClaudeCodeProvider } from './claude/claude-code';
 import { CopilotProvider } from './copilot/copilot';
 import { CodexAppServerChat } from './codex/app-server-chat';
@@ -19,10 +19,23 @@ import { CloudflareTunnelSupervisor } from './server/cloudflare-tunnel';
 import { BonjourAdvertiser } from './server/mdns';
 import { SeenThreadStore } from './server/seen-thread-store';
 import { HelperSettingsStore } from './server/settings';
+import { createDefaultDeviceStore } from './auth/device-store';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const singleInstanceLock = await acquireSingleInstanceLock();
+if (!singleInstanceLock.acquired) {
+  console.error(
+    `Another Agent Pulse helper is already running (pid ${singleInstanceLock.existingPid}).`
+  );
+  console.error(
+    `If that is wrong, delete the lock file and try again:\n  ${SINGLE_INSTANCE_LOCK_PATH}`
+  );
+  process.exit(1);
+}
+
 const settingsStore = new HelperSettingsStore();
-const registry = new DeviceRegistry(new KeychainDeviceStore());
+const registry = new DeviceRegistry(createDefaultDeviceStore());
 const pairing = new PairingManager(registry);
 const adminAuth = new AdminAuth({
   onPasscodeGenerated: (passcode) => {
@@ -48,7 +61,9 @@ const usageProvider = async (threadId: string) => {
 const catalog = new CatalogReader();
 catalog.start();
 const advertiser = new BonjourAdvertiser();
-const appServer = new CodexAppServerChat(new CodexAppServerClient({ version: '0.1.0' }));
+const appServer = new CodexAppServerChat(new CodexAppServerClient({ version: '0.1.0' }), {
+  rolloutLookup
+});
 const claudeCode = new ClaudeCodeProvider();
 const copilot = new CopilotProvider();
 const desktopControlDisabled = process.env.AGENT_PULSE_DISABLE_CODEX_DESKTOP === '1';
@@ -136,6 +151,7 @@ process.on('SIGINT', async () => {
   opener.dispose();
   claudeCode.dispose();
   catalog.dispose();
+  await singleInstanceLock.release();
   process.exit(0);
 });
 
@@ -146,5 +162,6 @@ process.on('SIGTERM', async () => {
   opener.dispose();
   claudeCode.dispose();
   catalog.dispose();
+  await singleInstanceLock.release();
   process.exit(0);
 });

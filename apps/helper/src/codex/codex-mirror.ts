@@ -2,6 +2,7 @@ import type {
   ChatAttachment,
   ChatMessage,
   PendingApprovalRequest,
+  SelectableCodexPermissionModeId,
   ThreadFileChangeSummary,
   ThreadMessageResponse,
   ThreadSendState,
@@ -55,6 +56,8 @@ export type CodexMirrorSendOptions = {
   // omit them when collaborationMode is undefined.
   model?: string;
   effort?: string;
+  permissionMode?: SelectableCodexPermissionModeId;
+  cwd?: string;
   attachments?: ChatAttachment[];
 };
 
@@ -511,7 +514,7 @@ export function createCodexMirror(options: CodexMirrorOptions): CodexMirror {
     if (!ipc.isReady()) {
       throw new SendBlockedError(
         'thread_unavailable',
-        'Not connected to the Codex app — open Codex on this Mac to mirror messages.'
+        'Not connected to the Codex app — open Codex on the helper computer to mirror messages.'
       );
     }
     try {
@@ -521,7 +524,7 @@ export function createCodexMirror(options: CodexMirrorOptions): CodexMirror {
       if (THREAD_UNAVAILABLE_ERROR_MARKERS.some((marker) => message.includes(marker))) {
         throw new SendBlockedError(
           'thread_unavailable',
-          'Codex could not deliver the request — the thread is not currently focused on the Mac. Try again in a moment.'
+          'Codex could not deliver the request — the thread is not currently focused on the helper computer. Try again in a moment.'
         );
       }
       if (message.includes('timeout') || message.includes('request-timeout')) {
@@ -559,6 +562,9 @@ export function createCodexMirror(options: CodexMirrorOptions): CodexMirror {
         turnStartParams: {
           threadId,
           input: userTextInput(text, sendOptions?.attachments),
+          ...(sendOptions?.permissionMode
+            ? turnStartPermissionOverridesForMode(sendOptions.permissionMode, sendOptions.cwd)
+            : {}),
           ...(collaborationModePayload ? { collaborationMode: collaborationModePayload } : {})
         }
       }
@@ -606,7 +612,7 @@ export function createCodexMirror(options: CodexMirrorOptions): CodexMirror {
     if (!ipc.isReady()) {
       throw new SendBlockedError(
         'thread_unavailable',
-        'Not connected to the Codex app — open Codex on this Mac to mirror messages.'
+        'Not connected to the Codex app — open Codex on the helper computer to mirror messages.'
       );
     }
 
@@ -782,7 +788,7 @@ export function createCodexMirror(options: CodexMirrorOptions): CodexMirror {
       if (THREAD_UNAVAILABLE_ERROR_MARKERS.some((marker) => message.includes(marker))) {
         throw new SendBlockedError(
           'thread_unavailable',
-          'Codex Desktop has the apply-patch command, but this app build does not expose it to Agent Pulse yet. Open Codex on your Mac to use Undo/Reapply for now.'
+          'Codex Desktop has the apply-patch command, but this app build does not expose it to Agent Pulse yet. Open Codex on the helper computer to use Undo/Reapply for now.'
         );
       }
       throw error;
@@ -804,7 +810,7 @@ export function createCodexMirror(options: CodexMirrorOptions): CodexMirror {
     if (!ipc.isReady()) {
       throw new SendBlockedError(
         'thread_unavailable',
-        'Codex Desktop is not connected. Open Codex on your Mac to use voice transcription.'
+        'Codex Desktop is not connected. Open Codex on the helper computer to use voice transcription.'
       );
     }
 
@@ -1546,6 +1552,45 @@ function pendingApprovalFromItem(
   };
 }
 
+function turnStartPermissionOverridesForMode(
+  mode: SelectableCodexPermissionModeId,
+  cwd?: string
+): Record<string, unknown> {
+  switch (mode) {
+    case 'fullAccess':
+      return {
+        approvalPolicy: 'never',
+        approvalsReviewer: 'user',
+        sandboxPolicy: { type: 'dangerFullAccess' }
+      };
+    case 'autoReview':
+      return {
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'auto_review',
+        sandboxPolicy: {
+          type: 'workspaceWrite',
+          writableRoots: cwd ? [cwd] : [],
+          networkAccess: false,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false
+        }
+      };
+    case 'default':
+    default:
+      return {
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'user',
+        sandboxPolicy: {
+          type: 'workspaceWrite',
+          writableRoots: cwd ? [cwd] : [],
+          networkAccess: false,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false
+        }
+      };
+  }
+}
+
 function approvalRequestId(value: unknown): string | null {
   if (typeof value === 'string' && value.length > 0) {
     return value;
@@ -1701,7 +1746,7 @@ function userTextInput(text: string, attachments: ChatAttachment[] = []) {
       continue;
     }
     input.push({
-      type: 'input_image',
+      type: 'image',
       image_url: {
         url: attachment.url
       }

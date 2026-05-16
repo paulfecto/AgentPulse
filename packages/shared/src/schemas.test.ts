@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   ChatMessageSchema,
+  AppearanceSettingsUpdateRequestSchema,
+  DeviceRenameRequestSchema,
   HelperHealthSchema,
+  ImportedCodexThemeSchema,
   LiveEventSchema,
   PairRequestSchema,
   PairResponseSchema,
+  PairingPinCreateRequestSchema,
   PairingDeviceListResponseSchema,
   RemoteAccessSettingsSchema,
   ThreadCreateRequestSchema,
@@ -162,6 +166,35 @@ describe('shared schemas', () => {
     expect(settings.publicUrl).toBe('https://beta.dope-ai.kr/agent-pulse');
   });
 
+  it('validates imported Codex themes for appearance settings', () => {
+    const importedTheme = ImportedCodexThemeSchema.parse({
+      codeThemeId: 'notion',
+      theme: {
+        accent: '#3183D8',
+        contrast: 45,
+        fonts: { code: null, ui: null },
+        ink: '#37352F',
+        opaqueWindows: true,
+        semanticColors: {
+          diffAdded: '#008000',
+          diffRemoved: '#a31515',
+          skill: '#0000ff'
+        },
+        surface: '#ffffff'
+      },
+      variant: 'light'
+    });
+
+    expect(importedTheme.theme.accent).toBe('#3183d8');
+    expect(importedTheme.variant).toBe('light');
+    expect(
+      AppearanceSettingsUpdateRequestSchema.parse({
+        codexTheme: importedTheme,
+        themePreference: 'light'
+      }).themePreference
+    ).toBe('light');
+  });
+
   it('masks tokens without printing the full secret', () => {
     expect(maskToken('tok_1234567890abcdef')).toBe('tok_...cdef');
   });
@@ -248,7 +281,29 @@ describe('shared schemas', () => {
       modelSlug: 'gpt-5.2',
       reasoningEffort: 'high'
     });
+    expect(
+      ThreadCreateRequestSchema.parse({
+        location: 'chat',
+        permissionMode: 'autoReview'
+      })
+    ).toEqual({
+      provider: 'codex',
+      location: 'chat',
+      permissionMode: 'autoReview'
+    });
     expect(() => ThreadCreateRequestSchema.parse({})).toThrow();
+    expect(() =>
+      ThreadCreateRequestSchema.parse({
+        location: 'chat',
+        permissionMode: 'sandbox'
+      })
+    ).toThrow();
+    expect(() =>
+      ThreadCreateRequestSchema.parse({
+        location: 'chat',
+        permissionMode: 'auto'
+      })
+    ).toThrow();
     expect(() =>
       ThreadCreateRequestSchema.parse({
         location: 'chat',
@@ -341,5 +396,25 @@ describe('shared schemas', () => {
         ]
       }).devices[0]?.deviceName
     ).toBe('Desk tablet');
+
+    expect(
+      PairingPinCreateRequestSchema.parse({
+        deviceName: 'Kitchen display'
+      }).deviceName
+    ).toBe('Kitchen display');
+
+    expect(() =>
+      PairingPinCreateRequestSchema.parse({
+        deviceId: 'device-1',
+        deviceName: 'Kitchen display'
+      })
+    ).toThrow();
+
+    expect(
+      DeviceRenameRequestSchema.parse({
+        deviceId: 'device-1',
+        deviceName: 'Kitchen display'
+      }).deviceName
+    ).toBe('Kitchen display');
   });
 });

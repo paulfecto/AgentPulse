@@ -124,7 +124,8 @@ describe('KeychainDeviceStore', () => {
 
   it('targets the user login keychain instead of relying on security default lookup', async () => {
     const { execFile, calls } = buildKeychainEmulator();
-    const store = new KeychainDeviceStore('com.agentpulse.test', execFile);
+    const expectedKeychain = `${homedir()}/Library/Keychains/login.keychain-db`;
+    const store = new KeychainDeviceStore('com.agentpulse.test', execFile, expectedKeychain);
 
     await store.save({
       deviceId: 'device-1',
@@ -134,7 +135,6 @@ describe('KeychainDeviceStore', () => {
       createdAt: '2026-04-26T15:00:00.000Z'
     });
 
-    const expectedKeychain = `${homedir()}/Library/Keychains/login.keychain-db`;
     expect(calls.length).toBeGreaterThan(0);
     for (const call of calls) {
       expect(call.args.at(-1)).toBe(expectedKeychain);

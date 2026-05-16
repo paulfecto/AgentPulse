@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
-  "task_id": "agentos-convergence",
-  "plan_ref": "docs/exec-plans/active/agentos-convergence.md",
+  "task_id": "upstream-product-sync",
+  "plan_ref": "docs/exec-plans/active/upstream-product-sync.md",
   "owner_lane": "codex",
   "status": "in-progress",
   "latest_routing_decision_ref": "",
@@ -14,8 +14,19 @@
   },
   "resume_cursor": {
     "status": "in-progress",
-    "latest_heartbeat_at": "2026-05-10T10:32:33Z",
+    "latest_heartbeat_at": "2026-05-16T03:36:58Z",
     "continuation_hint": ""
+  },
+  "mission_status": {
+    "enabled": false,
+    "task_id": "",
+    "source_plan": "",
+    "status": "inactive",
+    "verifier_lane": "",
+    "weaker_verifier_warning": false,
+    "completed_milestones": 0,
+    "total_milestones": 0,
+    "next_incomplete_milestone": ""
   },
   "termination_supervisor_status": {
     "enabled": true,
@@ -29,5 +40,5 @@
     "consecutive_no_progress_turns": 0,
     "last_failing_command": ""
   },
-  "last_updated_at": "2026-05-10T10:34:55Z"
+  "last_updated_at": "2026-05-16T03:38:59Z"
 }

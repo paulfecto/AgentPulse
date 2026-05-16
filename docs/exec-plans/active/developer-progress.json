@@ -1,13 +1,13 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-05-10T10:34:56Z",
+  "generated_at": "2026-05-16T03:38:59Z",
   "visibility": "internal-only",
   "locales": [
     "en",
     "ko"
   ],
-  "task_id": "agentos-convergence",
-  "plan_ref": "docs/exec-plans/active/agentos-convergence.md",
+  "task_id": "upstream-product-sync",
+  "plan_ref": "docs/exec-plans/active/upstream-product-sync.md",
   "owner_lane": "codex",
   "status": "in-progress",
   "next_proof_gate": "",
@@ -19,14 +19,14 @@
   "task_items_ref": "docs/exec-plans/active/task-board-items.json",
   "tasks": [
     {
-      "id": "agentos-convergence",
-      "title_en": "agentos-convergence",
-      "title_ko": "agentos-convergence",
+      "id": "upstream-product-sync",
+      "title_en": "upstream-product-sync",
+      "title_ko": "upstream-product-sync",
       "status": "in-progress",
       "lane": "codex",
-      "summary_en": "docs/exec-plans/active/agentos-convergence.md",
-      "summary_ko": "docs/exec-plans/active/agentos-convergence.md",
-      "href": "docs/exec-plans/active/agentos-convergence.md"
+      "summary_en": "docs/exec-plans/active/upstream-product-sync.md",
+      "summary_ko": "docs/exec-plans/active/upstream-product-sync.md",
+      "href": "docs/exec-plans/active/upstream-product-sync.md"
     }
   ]
 }
