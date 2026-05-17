@@ -40,7 +40,7 @@ export PATH="/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin:/
 state_dir="${AGENT_PULSE_BETA_STATE_DIR:-$HOME/Library/Application Support/Agent Pulse Beta}"
 admin_json="$state_dir/admin.json"
 admin_passcode_file="$state_dir/admin-passcode.txt"
-helper_url="${AGENT_PULSE_HELPER_URL:-http://127.0.0.1:55110}"
+helper_url="${AGENT_PULSE_HELPER_URL:-http://127.0.0.1:55112}"
 public_url="${AGENT_PULSE_PUBLIC_URL:-https://beta.dope-ai.kr/agent-pulse}"
 launch_label="${AGENT_PULSE_LAUNCH_LABEL:-com.agentpulse.helper.55110.beta-edge}"
 
@@ -149,9 +149,7 @@ if create_pin_with_current_passcode; then
   exit 0
 fi
 
-log "Current isolated beta admin passcode is unavailable or invalid; rotating beta admin credentials only."
-write_managed_admin_passcode
-restart_helper
-wait_for_helper
-create_pin_with_current_passcode
+echo "Could not create a pairing PIN through the relayed Mac helper." >&2
+echo "The public beta helper is expected at $helper_url; create the PIN on the Codex desktop Mac or refresh its managed admin passcode there." >&2
+exit 1
 REMOTE

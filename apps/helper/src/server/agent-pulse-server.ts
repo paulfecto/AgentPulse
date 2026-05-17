@@ -5504,7 +5504,7 @@ function startThreadPolling(
         chatRoot
       );
       const toReconcile = threads.filter((thread) =>
-        shouldReconcileThread(thread, fullSweep, loadedIdsSet)
+        shouldReconcileThread(thread, fullSweep, loadedIdsSet, { includeRecent: false })
       );
       const reconciledActive = await reconcileThreads(toReconcile, appServer, transformTranscript);
 
@@ -5644,7 +5644,7 @@ async function reconcileThreadStatuses(
   const loadedIdsSet =
     loadedThreadIds instanceof Map ? new Set(loadedThreadIds.keys()) : loadedThreadIds;
   const toReconcile = liveThreads.filter((thread) =>
-    shouldReconcileThread(thread, false, loadedIdsSet)
+    shouldReconcileThread(thread, false, loadedIdsSet, { includeRecent: false })
   );
   const reconciled = await reconcileThreads(toReconcile, appServer, transformTranscript);
   const byId = new Map(reconciled.map(({ thread }) => [thread.threadId, thread]));
@@ -6380,7 +6380,8 @@ function truncateForSummary(value: string, maxLength: number): string {
 function shouldReconcileThread(
   thread: Thread,
   fullSweep: boolean,
-  loadedThreadIds?: Set<string>
+  loadedThreadIds?: Set<string>,
+  options: { includeRecent?: boolean } = {}
 ): boolean {
   if (loadedThreadIds?.has(thread.threadId)) {
     return true;
@@ -6393,7 +6394,7 @@ function shouldReconcileThread(
     return false;
   }
   const isRecent = Date.now() - lastActivityMs < ACTIVE_RECENCY_MS;
-  return isRecent || (fullSweep && thread.status === 'unknown');
+  return (options.includeRecent === true && isRecent) || (fullSweep && thread.status === 'unknown');
 }
 
 function mergeDraftThreads(threads: Thread[], drafts: Map<string, Thread>): Thread[] {

@@ -39,8 +39,9 @@ The workflow uses the same macmini3 secret model as the shared beta stack:
 - `MACMINI3_PASSWORD`
 
 It checks out `paulfecto/AgentPulse` on macmini3 at the exact pushed `main`
-SHA, builds with `/agent-pulse/`, starts only `agentpulse-beta-edge`, refreshes
-only the Agent Pulse helper LaunchAgent, and reconciles only the marked Agent
+SHA, builds with `/agent-pulse/`, starts only `agentpulse-beta-edge`, validates
+the existing Mac helper relay on `127.0.0.1:55112`, disables any stale local
+macmini3 Agent Pulse helper LaunchAgent, and reconciles only the marked Agent
 Pulse block inside the active `beta.dope-ai.kr` shared nginx edge.
 
 For direct host operation from the Agent Pulse checkout on macmini3:

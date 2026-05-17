@@ -751,4 +751,35 @@ describe('Codex thread reader', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it('bounds rollout signal reads so huge fresh pinned threads cannot block the sidebar', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'agent-pulse-rollout-tail-'));
+    const filePath = path.join(directory, 'rollout.jsonl');
+    const reader = new CodexThreadReader({ rolloutSignalTailBytes: 256 }) as any;
+
+    try {
+      await writeFile(
+        filePath,
+        [
+          '{"type":"event_msg","message":"waiting for approval"}',
+          'x'.repeat(1024),
+          '{"type":"event_msg","payload":{"type":"task_complete"}}'
+        ].join('\n'),
+        'utf8'
+      );
+
+      await expect(
+        reader.readSignalsForRow({
+          id: 'thread-1',
+          title: 'Thread',
+          cwd: '/Users/me/project',
+          updated_at_ms: Date.now(),
+          archived: 0,
+          rollout_path: filePath
+        })
+      ).resolves.toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });

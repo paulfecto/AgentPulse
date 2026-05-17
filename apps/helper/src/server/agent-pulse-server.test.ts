@@ -3024,6 +3024,67 @@ describe('Agent Pulse helper API', () => {
     }
   });
 
+  it('does not read recent idle transcripts just because Codex touched sidebar metadata', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const recentIdleThread: Thread = {
+      threadId: 'thread-recent-idle',
+      provider: 'codex',
+      title: 'Recent idle chat',
+      workspace: 'CodexPulse',
+      status: 'idle',
+      lastActivityAt: new Date().toISOString(),
+      lastTurnSummary: ''
+    };
+    const appServer = {
+      isConnected: () => true,
+      listLoadedThreadStatuses: vi.fn(async () => new Map<string, Thread['status']>()),
+      readTranscript: vi.fn(async (threadId: string): Promise<ThreadTranscript> => ({
+        threadId,
+        activeTurnId: null,
+        sendState: {
+          canSend: true,
+          reason: 'ready',
+          label: 'Ready'
+        },
+        messages: []
+      })),
+      sendMessage: vi.fn()
+    };
+    const server = await startAgentPulseServer({
+      settings: {
+        port: await pickFreeHighPort(),
+        lanEnabled: false,
+        mobileSendEnabled: true,
+        remoteAccess: remoteAccessSettings()
+      },
+      settingsStore: { save: vi.fn(), load: vi.fn() } as unknown as HelperSettingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: { listThreads: async () => [recentIdleThread] },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      appServer,
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      const response = await fetch(`${server.url}/threads/list`, {
+        headers: authHeaders(token, deviceId)
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        threads: [recentIdleThread]
+      });
+      expect(appServer.listLoadedThreadStatuses).toHaveBeenCalled();
+      expect(appServer.readTranscript).not.toHaveBeenCalled();
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('reconciles old idle threads when app-server reports them as loaded', async () => {
     const registry = new DeviceRegistry(new MemoryDeviceStore());
     const pairing = new PairingManager(registry);

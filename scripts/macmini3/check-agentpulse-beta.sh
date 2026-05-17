@@ -6,7 +6,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/macmini3/lib-agentpulse-beta-probe.sh
 source "$repo_root/scripts/macmini3/lib-agentpulse-beta-probe.sh"
 
-helper_url="${AGENT_PULSE_HELPER_URL:-http://127.0.0.1:55110}"
+helper_url="${AGENT_PULSE_HELPER_URL:-http://127.0.0.1:55112}"
 edge_url="${AGENT_PULSE_EDGE_URL:-http://127.0.0.1:4355}"
 public_url="${AGENT_PULSE_PUBLIC_URL:-https://beta.dope-ai.kr/agent-pulse}"
 

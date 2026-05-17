@@ -22,6 +22,7 @@ import {
 } from '../chats/shared-chat-paths';
 
 const execFileAsync = promisify(execFile);
+const ROLLOUT_SIGNAL_TAIL_BYTES = 64 * 1024;
 
 export type SqliteThreadRow = {
   id: string;
@@ -43,6 +44,7 @@ export type CodexThreadReaderOptions = {
   maxIdleThreadsPerProject?: number;
   recentlyActiveMs?: number;
   liveSignalTtlMs?: number;
+  rolloutSignalTailBytes?: number;
   chatRoot?: string;
 };
 
@@ -75,6 +77,7 @@ export class CodexThreadReader {
   private readonly maxIdleThreadsPerProject: number;
   private readonly recentlyActiveMs: number;
   private readonly liveSignalTtlMs: number;
+  private readonly rolloutSignalTailBytes: number;
   private readonly chatRoot: string | undefined;
 
   constructor(options: CodexThreadReaderOptions = {}) {
@@ -85,6 +88,7 @@ export class CodexThreadReader {
     this.maxIdleThreadsPerProject = options.maxIdleThreadsPerProject ?? 5;
     this.recentlyActiveMs = options.recentlyActiveMs ?? 2 * 60 * 1000;
     this.liveSignalTtlMs = options.liveSignalTtlMs ?? 30 * 60 * 1000;
+    this.rolloutSignalTailBytes = options.rolloutSignalTailBytes ?? ROLLOUT_SIGNAL_TAIL_BYTES;
     this.chatRoot = options.chatRoot;
   }
 
@@ -199,7 +203,7 @@ export class CodexThreadReader {
     }
 
     try {
-      return readRolloutSignals(await readLastLines(row.rollout_path, 80));
+      return readRolloutSignals(await readLastLines(row.rollout_path, 80, this.rolloutSignalTailBytes));
     } catch {
       return ['connection'];
     }

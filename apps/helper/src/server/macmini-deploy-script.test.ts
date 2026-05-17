@@ -26,26 +26,20 @@ describe('macmini3 Agent Pulse beta deploy automation', () => {
     expect(runner).toContain('https://beta.dope-ai.kr/health');
   });
 
-  it('installs only a Codex-safe Agent Pulse helper LaunchAgent on 55110', async () => {
+  it('uses the Mac helper relay instead of starting a second macmini3 helper', async () => {
     const deploy = await readRepoFile('scripts/macmini3/deploy-agentpulse-beta.sh');
-    const helper = await readRepoFile('scripts/macmini3/run-agentpulse-beta-helper.sh');
+    const edge = await readRepoFile('deploy/macmini3/agentpulse-nginx.conf');
 
+    expect(deploy).toContain('AGENT_PULSE_RELAY_HELPER_PORT');
+    expect(deploy).toContain('Disabling stale macmini3 local helper LaunchAgent');
     expect(deploy).toContain('com.agentpulse.helper.55110.beta-edge');
-    expect(deploy).toContain('AGENT_PULSE_DISABLE_CODEX_DESKTOP=1');
-    expect(deploy).toContain('AGENT_PULSE_SKIP_MANAGED_TUNNEL=1');
     expect(deploy).toContain('launchctl bootout "gui/$uid/$launch_label"');
-    expect(deploy).toContain('launchctl bootout "gui/$uid" "$plist_path"');
-    expect(deploy).toContain('LaunchAgent $launch_label is still registered after bootout.');
-    expect(deploy).toContain('Port $helper_port is already in use by a non-Agent Pulse beta LaunchAgent process.');
+    expect(deploy).toContain('Validating Mac helper relay on 127.0.0.1:$helper_port');
     expect(deploy).toContain('npm exec --yes pnpm@10.28.2 --');
     expect(deploy).toContain('run_pnpm install --frozen-lockfile');
-    expect(deploy).toContain("pgrep -fl 'codex app-server'");
-    expect(deploy).toContain("grep -v '/tmp/fake-bin/codex'");
-    expect(helper).toContain('AGENT_PULSE_WRITE_SETTINGS_ONLY');
-    expect(helper).toContain('mode: \'edge\'');
-    expect(helper).toContain('mobileSendEnabled: true');
-    expect(helper).toContain('prepend_codex_cli_path');
-    expect(helper).toContain("find \"$nvm_root/versions/node\" -path '*/bin/codex' \\( -type f -o -type l \\)");
+    expect(edge).toContain('host.docker.internal:55112');
+    expect(deploy).not.toContain('Installing Codex-safe LaunchAgent $launch_label');
+    expect(deploy).not.toContain("pgrep -fl 'codex app-server'");
   });
 
   it('reconciles only a marked /agent-pulse shared-edge block and supports host or container upstreams', async () => {

@@ -11,7 +11,7 @@ expected_sha="${1:-${AGENT_PULSE_EXPECTED_SHA:-}}"
 public_url="${AGENT_PULSE_PUBLIC_URL:-https://beta.dope-ai.kr/agent-pulse}"
 public_base_path="${AGENT_PULSE_PUBLIC_BASE_PATH:-/agent-pulse/}"
 edge_port="${AGENT_PULSE_EDGE_PORT:-4355}"
-helper_port="${AGENT_PULSE_HELPER_PORT:-55110}"
+helper_port="${AGENT_PULSE_RELAY_HELPER_PORT:-${AGENT_PULSE_HELPER_PORT:-55112}}"
 local_shared_url="${AGENT_PULSE_LOCAL_SHARED_URL:-https://beta.dope-ai.kr/agent-pulse}"
 local_shared_resolve="${AGENT_PULSE_LOCAL_SHARED_RESOLVE:-beta.dope-ai.kr:443:127.0.0.1}"
 launch_label="${AGENT_PULSE_LAUNCH_LABEL:-com.agentpulse.helper.55110.beta-edge}"
@@ -301,6 +301,12 @@ PY
   launchctl kickstart -k "gui/$uid/$watchdog_label" >/dev/null 2>&1 || true
 }
 
+disable_local_helper_launch_agent() {
+  local uid
+  uid="$(id -u)"
+  launchctl bootout "gui/$uid/$launch_label" >/dev/null 2>&1 || true
+}
+
 if [[ -n "$expected_sha" ]]; then
   actual_sha="$(git rev-parse HEAD)"
   if [[ "$actual_sha" != "$expected_sha" ]]; then
@@ -331,23 +337,11 @@ log "Installing dependencies and building with base path $public_base_path"
 run_pnpm install --frozen-lockfile
 AGENT_PULSE_PUBLIC_BASE_PATH="$public_base_path" run_pnpm build
 
-log "Writing isolated helper settings"
-AGENT_PULSE_SKIP_BUILD=1 \
-AGENT_PULSE_WRITE_SETTINGS_ONLY=1 \
-AGENT_PULSE_HELPER_PORT="$helper_port" \
-AGENT_PULSE_PUBLIC_URL="$public_url" \
-AGENT_PULSE_PUBLIC_BASE_PATH="$public_base_path" \
-bash scripts/macmini3/run-agentpulse-beta-helper.sh
-
-log "Installing Codex-safe LaunchAgent $launch_label"
-ensure_launch_agent
+log "Disabling stale macmini3 local helper LaunchAgent $launch_label"
+disable_local_helper_launch_agent
+log "Validating Mac helper relay on 127.0.0.1:$helper_port"
 wait_for_url_contains "http://127.0.0.1:${helper_port}/health/get" '"codexAppServer":"connected"' 60
 agentpulse_require_health_url "http://127.0.0.1:${helper_port}/health/get"
-
-if ! pgrep -fl 'codex app-server' | grep -v '/tmp/fake-bin/codex' >/dev/null 2>&1; then
-  echo "Real Codex app-server process was not found after helper start." >&2
-  exit 1
-fi
 
 log "Starting Agent Pulse Docker edge on port $edge_port"
 AGENT_PULSE_EDGE_PORT="$edge_port" AGENT_PULSE_EDGE_BIND="${AGENT_PULSE_EDGE_BIND:-127.0.0.1}" \
