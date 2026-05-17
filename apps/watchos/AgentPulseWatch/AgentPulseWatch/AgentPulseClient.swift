@@ -142,10 +142,29 @@ final class AgentPulseClient {
 
     private static func validate(response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
+        if responseLooksLikeHtml(http, data: data) {
+            throw AgentPulseWatchError.server(
+                "Agent Pulse returned a web page instead of API data. The public route is pointing at the wrong app."
+            )
+        }
         guard (200..<300).contains(http.statusCode) else {
             let message = (try? JSONDecoder().decode(ServerError.self, from: data).error) ?? "Agent Pulse returned \(http.statusCode)."
             throw AgentPulseWatchError.server(message)
         }
+    }
+
+    private static func responseLooksLikeHtml(_ response: HTTPURLResponse, data: Data) -> Bool {
+        let contentType = response.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
+        if contentType.contains("text/html") {
+            return true
+        }
+        guard let prefix = String(data: data.prefix(512), encoding: .utf8)?.lowercased() else {
+            return false
+        }
+        return prefix.contains("<!doctype html") ||
+            prefix.contains("<html") ||
+            prefix.contains("/project-manager/") ||
+            prefix.contains("<title>dope-ai</title>")
     }
 }
 

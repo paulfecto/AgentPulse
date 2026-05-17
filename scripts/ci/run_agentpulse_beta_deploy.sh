@@ -26,6 +26,8 @@ request_body() {
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
+# shellcheck source=scripts/macmini3/lib-agentpulse-beta-probe.sh
+source "$REPO_ROOT/scripts/macmini3/lib-agentpulse-beta-probe.sh"
 
 require_env MACMINI3_HOST
 require_env MACMINI3_USER
@@ -74,19 +76,21 @@ bash scripts/macmini3/deploy-agentpulse-beta.sh "${CURRENT_HEAD_SHA}"
 REMOTE
 
 for attempt in $(seq 1 60); do
-  if agentpulse_body="$(request_body "${PUBLIC_URL%/}/health/get" 2>/dev/null)" &&
-    printf '%s' "$agentpulse_body" | grep -q '"codexAppServer"' &&
-    printf '%s' "$agentpulse_body" | grep -q '"connected"'; then
+  if agentpulse_check_health_url "${PUBLIC_URL%/}/health/get" 1; then
     break
   fi
 
   if [[ "$attempt" == "60" ]]; then
     echo "Agent Pulse public health did not converge at ${PUBLIC_URL%/}/health/get" >&2
-    printf '%s\n' "${agentpulse_body:-}" | sed -n '1,20p' >&2 || true
+    printf '%s\n' "${AGENT_PULSE_PROBE_ERROR:-unknown probe failure}" >&2
+    agentpulse_probe_preview >&2 || true
     exit 1
   fi
   sleep 2
 done
+
+agentpulse_require_json_url "${PUBLIC_URL%/}/watch/summary" "200|401"
+agentpulse_require_tablet_shell "${PUBLIC_URL%/}/"
 
 project_manager_health="$(request_body "https://beta.dope-ai.kr/project-manager/health")"
 if ! printf '%s' "$project_manager_health" | grep -qi 'healthy'; then
