@@ -148,8 +148,30 @@ final class AgentPulseClient {
             )
         }
         guard (200..<300).contains(http.statusCode) else {
-            let message = (try? JSONDecoder().decode(ServerError.self, from: data).error) ?? "Agent Pulse returned \(http.statusCode)."
+            let serverError = try? JSONDecoder().decode(ServerError.self, from: data)
+            if let pairingMessage = pairingResetMessage(for: http.statusCode, error: serverError?.error) {
+                throw AgentPulseWatchError.pairingResetRequired(pairingMessage)
+            }
+            let message = serverError?.error ?? "Agent Pulse returned \(http.statusCode)."
             throw AgentPulseWatchError.server(message)
+        }
+    }
+
+    private static func pairingResetMessage(for statusCode: Int, error: String?) -> String? {
+        guard statusCode == 401 || statusCode == 403 else {
+            return nil
+        }
+        switch error {
+        case "unknown-device":
+            return "This Watch is not paired with this Agent Pulse server anymore. Pair again with a fresh PIN."
+        case "revoked":
+            return "This Watch pairing was revoked. Pair again with a fresh PIN."
+        case "invalid":
+            return "This Watch session is no longer valid. Pair again with a fresh PIN."
+        case "missing":
+            return "This Watch session is incomplete. Pair again with a fresh PIN."
+        default:
+            return nil
         }
     }
 

@@ -1,0 +1,34 @@
+name: Agent Pulse Beta Pairing PIN
+run-name: Agent Pulse beta pairing PIN
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agentpulse-beta-pairing-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AGENT_PULSE_PUBLIC_URL: https://beta.dope-ai.kr/agent-pulse
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-pairing-pin:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: beta
+      url: https://beta.dope-ai.kr/agent-pulse
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Create macmini3 pairing PIN
+        env:
+          MACMINI3_HOST: ${{ secrets.MACMINI3_HOST }}
+          MACMINI3_USER: ${{ secrets.MACMINI3_USER }}
+          MACMINI3_PORT: ${{ secrets.MACMINI3_PORT }}
+          MACMINI3_PASSWORD: ${{ secrets.MACMINI3_PASSWORD }}
+        run: bash scripts/ci/run_agentpulse_beta_pairing_pin.sh

@@ -135,6 +135,7 @@ enum AgentPulseWatchError: LocalizedError {
     case missingSession
     case invalidBaseUrl
     case server(String)
+    case pairingResetRequired(String)
 
     var errorDescription: String? {
         switch self {
@@ -144,6 +145,15 @@ enum AgentPulseWatchError: LocalizedError {
             return "Enter a valid helper URL."
         case .server(let message):
             return message
+        case .pairingResetRequired(let message):
+            return message
         }
+    }
+
+    var requiresPairingReset: Bool {
+        if case .pairingResetRequired = self {
+            return true
+        }
+        return false
     }
 }

@@ -215,6 +215,10 @@ final class AgentPulseStore: ObservableObject {
                 try? await AgentPulseClient(session: session).deletePushToken()
             }
         }
+        clearLocalSession()
+    }
+
+    private func clearLocalSession(errorMessage nextErrorMessage: String? = nil) {
         keychain.clearSession()
         session = nil
         summary = nil
@@ -222,7 +226,7 @@ final class AgentPulseStore: ObservableObject {
         navigationThread = nil
         transcript = nil
         hasOlderMessages = false
-        errorMessage = nil
+        errorMessage = nextErrorMessage
     }
 
     private func followSelectedThreadUntilSettled(threadId: String) async {
@@ -290,9 +294,16 @@ final class AgentPulseStore: ObservableObject {
     }
 
     private func handle(_ error: Error) {
+        if let watchError = error as? AgentPulseWatchError, watchError.requiresPairingReset {
+            clearLocalSession(errorMessage: watchError.localizedDescription)
+            return
+        }
         errorMessage = error.localizedDescription
-        if error.localizedDescription.lowercased().contains("revoked") {
-            signOut()
+        let lowercasedMessage = error.localizedDescription.lowercased()
+        if lowercasedMessage.contains("unknown-device") ||
+            lowercasedMessage.contains("revoked") ||
+            lowercasedMessage.contains("invalid") {
+            clearLocalSession(errorMessage: "This Watch is no longer paired with this Agent Pulse server. Pair again with a fresh PIN.")
         }
     }
 
