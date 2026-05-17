@@ -58,6 +58,15 @@ full-history helper read that prevents empty transcript windows.
   32 summary threads, selected thread `CoWorkOS`, `transcriptMessages = 8`,
   `visibleMessages = 8`, public URL
   `https://beta.dope-ai.kr/agent-pulse`, and `openOnMac = false`.
+- 2026-05-17: Follow-up commit `dee2412` added strict capping to older
+  transcript pages after helper transformation. It was pushed to `origin/main`,
+  deployed to macmini3 directly over SSH, and the local Agent Pulse helper
+  LaunchAgent behind the reverse tunnel was restarted onto the rebuilt helper
+  bundle.
+- 2026-05-17: TestFlight build `202605172144` was archived from scheme
+  `AgentPulseMobile` and uploaded with local Xcode account export/upload. Xcode
+  reported `Uploaded AgentPulseMobile`, `Upload succeeded`, and
+  `** EXPORT SUCCEEDED **`.
 
 ## Validation Log
 
@@ -79,6 +88,27 @@ full-history helper read that prevents empty transcript windows.
   `https://beta.dope-ai.kr/agent-pulse/health/get` returned
   `content-type: application/json`, `status = ok`, and
   `codexAppServer = connected`.
+- PASS: Public route stress loop: 30 consecutive loops checked
+  `/health/get`, authenticated `/watch/summary`,
+  `/threads/:threadId/transcript?limit=8&history=full&window=tail`, and
+  `/threads/:threadId/transcript/older?before=<oldest>&limit=8`; every API
+  response stayed JSON, the selected thread was `CoWorkOS`, tail transcript
+  message count stayed `<= 8`, and older-page message count stayed `<= 8`.
+- PASS: TestFlight archive/upload:
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild
+  -project apps/watchos/AgentPulseWatch/AgentPulseWatch.xcodeproj -scheme
+  AgentPulseMobile -configuration Release -destination generic/platform=iOS
+  -archivePath Build/TestFlight/archives/AgentPulseWatch-20260517-214433.xcarchive
+  DEVELOPMENT_TEAM=H86Z687FT6 CURRENT_PROJECT_VERSION=202605172144
+  CODE_SIGN_STYLE=Automatic CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES
+  -allowProvisioningUpdates archive` succeeded, followed by
+  `xcodebuild -exportArchive ... -exportOptionsPlist
+  Build/TestFlight/exportOptions-20260517-214433-upload.plist
+  -allowProvisioningUpdates`; upload succeeded and App Store Connect began
+  processing the package.
+- PASS: `gh run list --repo paulfecto/AgentPulse --limit 5` showed only older
+  `workflow_dispatch` runs; no GitHub Actions run was manually triggered for
+  this deployment/upload path.
 - BLOCKED (pre-existing harness adapter state): `python3
   ../agentOS/scripts/harness/verify_harness.py --repo "$PWD"` and
   `verify_protocol.py` both failed before product checks because the resolved
@@ -94,4 +124,4 @@ full-history helper read that prevents empty transcript windows.
 
 ## Completion State
 
-- status: in_progress
+- status: complete
