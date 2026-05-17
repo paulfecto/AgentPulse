@@ -70,7 +70,25 @@ Xcode Watch validation, commit/push on `main`, and a local TestFlight upload.
   `https://beta.dope-ai.kr/agent-pulse`: `/health/get`, `/watch/summary`,
   and full transcript detail all returned JSON, and every transcript probe had
   visible messages.
+- 2026-05-17: Pushed scoped code fix to `origin/main` at
+  `e2920cb86415952b7a0ce9b480f0b56e24dd7c3b`.
+- 2026-05-17: Deployed macmini3 AgentPulse edge checkout to
+  `e2920cb86415952b7a0ce9b480f0b56e24dd7c3b`; `agentpulse-beta-edge`
+  was healthy on `127.0.0.1:4355`, and the public route again returned
+  AgentPulse JSON with `codexAppServer: "connected"`.
+- 2026-05-17: Post-deploy authenticated Watch detail proof passed:
+  `/watch/summary` returned 32 threads and the selected transcript returned
+  40 messages / 40 visible text messages through
+  `https://beta.dope-ai.kr/agent-pulse`.
+- 2026-05-17: Local TestFlight archive succeeded for build `202605172102`.
+  The first API-key export path failed with a cloud signing permission/profile
+  error, then local Xcode-account export/upload succeeded without using GitHub
+  Actions.
+- 2026-05-17: App Store Connect build API confirmed app id `6770043269`
+  (`Agent Pulse Watch`, bundle `com.paulfecto.AgentPulse`) has build
+  `202605172102` uploaded at `2026-05-17T05:07:11-07:00` with
+  `processingState: "VALID"` and `expired: false`.
 
 ## Completion State
 
-- status: in_progress
+- status: complete
