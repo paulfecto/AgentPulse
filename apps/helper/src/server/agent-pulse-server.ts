@@ -16,6 +16,7 @@ import {
   AppearanceSettingsSchema,
   AppearanceSettingsUpdateRequestSchema,
   ApprovalInboxResponseSchema,
+  WatchAttentionResponseSchema,
   CatalogCommandsResponseSchema,
   CatalogModelSchema,
   CatalogModelsResponseSchema,
@@ -1590,11 +1591,21 @@ function createApp(
     return visibleTranscript;
   };
 
-  const codexPendingRequestsForThread = (threadId: string): PendingApprovalRequest[] => {
-    if (!options.mirror?.isConnected() || !options.mirror.isThreadWaitingForApproval?.(threadId)) {
+  const appServerPendingRequestsForThread = (threadId: string): PendingApprovalRequest[] => {
+    if (!options.appServer?.isThreadWaitingForApproval?.(threadId)) {
       return [];
     }
-    return options.mirror.getPendingApprovalRequests?.(threadId) ?? [];
+    return options.appServer.getPendingApprovalRequests?.(threadId) ?? [];
+  };
+
+  const codexPendingRequestsForThread = (threadId: string): PendingApprovalRequest[] => {
+    if (desktopControlDisabled) {
+      return appServerPendingRequestsForThread(threadId);
+    }
+    if (options.mirror?.isConnected() && options.mirror.isThreadWaitingForApproval?.(threadId)) {
+      return options.mirror.getPendingApprovalRequests?.(threadId) ?? [];
+    }
+    return appServerPendingRequestsForThread(threadId);
   };
 
   const pendingRequestsForThread = (threadId: string): PendingApprovalRequest[] => {
@@ -2193,6 +2204,7 @@ function createApp(
     const { threads } = await listAllThreads();
     const watchThreads = threads.filter(isCodexAppVisibleThread);
     const remoteAccess = options.remoteAccess?.getStatus() ?? currentSettings.remoteAccess;
+    const attention = buildWatchAttention(watchThreads, pendingRequestsForThread);
     const requestUrl = new URL(context.req.url);
     const baseUrl = `${requestUrl.protocol}//${requestUrl.host}`;
     const statusRank = new Map(THREAD_STATUS_PRIORITY.map((status, index) => [status, index]));
@@ -2246,12 +2258,32 @@ function createApp(
         },
         capabilities: {
           canOpenOnMac: !desktopControlDisabled,
+          canRespond: true,
+          canStop: true,
+          canApprove: true,
+          canAnswerUserInput: true,
+          canStartThread: Boolean(options.appServer?.startThread),
+          canReviewArtifacts: true,
+          attentionCount: attention.total,
           ...(desktopControlDisabled
             ? { openOnMacReason: 'Open on Mac is disabled for this real Watch E2E runtime.' }
             : {})
         },
         threads: compactThreads
       })
+    );
+  });
+
+  app.get('/watch/attention', async (context) => {
+    const auth = await authenticate(context);
+    if (!auth.ok) {
+      return context.json({ error: auth.reason }, auth.reason === 'revoked' ? 403 : 401);
+    }
+
+    const { threads } = await listAllThreads();
+    const watchThreads = threads.filter(isCodexAppVisibleThread);
+    return context.json(
+      WatchAttentionResponseSchema.parse(buildWatchAttention(watchThreads, pendingRequestsForThread))
     );
   });
 
@@ -2353,6 +2385,13 @@ function createApp(
     }
 
     const parsed = ThreadCreateRequestSchema.parse(await context.req.json());
+    const isWatchClient = context.req.header('x-agent-pulse-client') === 'watch';
+    if (isWatchClient && (parsed.provider !== 'codex' || !parsed.projectId)) {
+      return context.json(
+        { error: 'Apple Watch can only start Codex threads from known projects.' },
+        400
+      );
+    }
     if (!isProviderEnabled(parsed.provider)) {
       return disabledProviderResponse(context, parsed.provider);
     }
@@ -3843,10 +3882,26 @@ function createApp(
       }
     }
     if (desktopControlDisabled) {
-      return context.json(
-        { error: 'Codex desktop control is disabled for this Agent Pulse runtime.' },
-        403
-      );
+      if (!options.appServer?.respondToApproval) {
+        return context.json(
+          { error: 'Codex app-server is not available to respond to approvals.' },
+          503
+        );
+      }
+      if (!appServerPendingRequestsForThread(threadId).some((request) => request.id === requestId && request.method === parsed.method)) {
+        return context.json(
+          { error: 'This Codex approval request is not pending for this thread anymore.' },
+          409
+        );
+      }
+      try {
+        await options.appServer.respondToApproval(threadId, requestId, parsed.method, parsed.decision);
+        return context.json(ApprovalDecisionResponseSchema.parse({ ok: true }));
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        const status = error instanceof SendBlockedError ? 409 : 503;
+        return context.json({ error: `Could not record approval: ${detail}` }, status);
+      }
     }
     if (!options.mirror?.respondToApproval || !options.mirror.isConnected()) {
       return context.json(
@@ -5678,6 +5733,127 @@ function buildApprovalInbox(
     return riskRank[a.riskLevel] - riskRank[b.riskLevel] || b.ageMs - a.ageMs;
   });
   return { items: sorted, total: sorted.length };
+}
+
+function buildWatchAttention(
+  threads: Thread[],
+  pendingRequestsForThread: (threadId: string) => PendingApprovalRequest[]
+) {
+  const items = threads.flatMap((thread) => {
+    const provider = providerForMemoryThread(thread);
+    return pendingRequestsForThread(thread.threadId).map((request) => {
+      const target = approvalCommandOrFileSummary(request);
+      return {
+        id: `${thread.threadId}:${request.id}`,
+        requestId: request.id,
+        threadId: thread.threadId,
+        provider,
+        threadTitle: thread.title,
+        workspace: thread.workspace,
+        method: request.method,
+        approvalType: approvalTypeLabel(request.method),
+        summary: approvalShortReason(request),
+        ...(target ? { detail: target } : {}),
+        riskLevel: approvalRiskLevel(request),
+        questions: watchAttentionQuestions(request),
+        decisions: watchAttentionDecisions(request),
+        createdAt: thread.lastActivityAt
+      };
+    });
+  });
+  const sorted = items.sort((a, b) => {
+    const riskRank = { high: 0, medium: 1, unknown: 2, low: 3 } as const;
+    return riskRank[a.riskLevel] - riskRank[b.riskLevel] || Date.parse(b.createdAt) - Date.parse(a.createdAt);
+  });
+  return { items: sorted, total: sorted.length };
+}
+
+type WatchAttentionDecisionPayload = {
+  id: 'approve' | 'approve_for_session' | 'deny' | 'cancel' | 'skip';
+  label: string;
+  style: 'primary' | 'secondary' | 'destructive';
+};
+
+function watchAttentionDecisions(request: PendingApprovalRequest): WatchAttentionDecisionPayload[] {
+  if (request.method === 'item/tool/requestUserInput' || request.method === 'tool/requestUserInput') {
+    return [
+      { id: 'approve', label: 'Answer', style: 'primary' },
+      { id: 'skip', label: 'Skip', style: 'destructive' }
+    ];
+  }
+  if (request.method === 'item/plan/requestImplementation') {
+    return [
+      { id: 'approve', label: 'Implement', style: 'primary' },
+      { id: 'deny', label: 'Cancel', style: 'destructive' }
+    ];
+  }
+  const decisions: WatchAttentionDecisionPayload[] = [
+    { id: 'approve', label: 'Approve', style: 'primary' }
+  ];
+  if (
+    request.method === 'item/permissions/requestApproval' ||
+    request.method === 'mcpServer/elicitation/request' ||
+    request.method === 'execCommandApproval' ||
+    request.method === 'applyPatchApproval'
+  ) {
+    decisions.push({ id: 'approve_for_session', label: 'Approve for session', style: 'secondary' });
+  }
+  decisions.push({
+    id: request.method === 'mcpServer/elicitation/request' ? 'cancel' : 'deny',
+    label: 'Deny',
+    style: 'destructive'
+  });
+  return decisions;
+}
+
+function watchAttentionQuestions(request: PendingApprovalRequest) {
+  const rawQuestions = request.params?.questions;
+  if (!Array.isArray(rawQuestions)) {
+    return undefined;
+  }
+  const questions = rawQuestions.flatMap((rawQuestion, index) => {
+    if (!rawQuestion || typeof rawQuestion !== 'object' || Array.isArray(rawQuestion)) {
+      return [];
+    }
+    const question = rawQuestion as Record<string, unknown>;
+    const id = stringParam(question, 'id') ?? `question-${index + 1}`;
+    const prompt = stringParam(question, 'question') ??
+      stringParam(question, 'prompt') ??
+      stringParam(question, 'label') ??
+      stringParam(question, 'header') ??
+      'Answer required';
+    return [{
+      id,
+      prompt: truncateForSummary(prompt, 240),
+      ...watchAttentionQuestionOptions(question)
+    }];
+  });
+  return questions.length > 0 ? questions : undefined;
+}
+
+function watchAttentionQuestionOptions(question: Record<string, unknown>) {
+  const rawOptions = question.options ?? question.choices;
+  if (!Array.isArray(rawOptions)) {
+    return {};
+  }
+  const options = rawOptions.flatMap((rawOption, index) => {
+    if (typeof rawOption === 'string') {
+      return [{ id: rawOption, label: rawOption }];
+    }
+    if (!rawOption || typeof rawOption !== 'object' || Array.isArray(rawOption)) {
+      return [];
+    }
+    const option = rawOption as Record<string, unknown>;
+    const label = stringParam(option, 'label') ?? stringParam(option, 'text') ?? stringParam(option, 'value');
+    if (!label) {
+      return [];
+    }
+    return [{
+      id: stringParam(option, 'id') ?? stringParam(option, 'value') ?? `option-${index + 1}`,
+      label
+    }];
+  });
+  return options.length > 0 ? { options } : {};
 }
 
 function watchApprovalNotificationSummary(requests: PendingApprovalRequest[]): {

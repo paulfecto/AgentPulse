@@ -2,6 +2,7 @@ REQUIREMENTS.md
 
 .DS_Store
 node_modules/
+.pnpm-store/
 dist/
 build/
 coverage/
@@ -15,6 +16,7 @@ out/
 .idea/
 
 # Xcode / watchOS app artifacts
+Build/
 *.xcuserstate
 *.xcuserdatad/
 *.xcodeproj/project.xcworkspace/xcuserdata/

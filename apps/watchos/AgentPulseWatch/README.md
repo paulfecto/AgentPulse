@@ -53,6 +53,8 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   build
 ```
 
+For TestFlight archive and upload operations, see `TESTFLIGHT.md`.
+
 ## Pairing
 
 1. In Agent Pulse settings, generate a pairing PIN.

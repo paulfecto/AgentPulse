@@ -5,13 +5,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationView {
-            Group {
-                if store.isPaired {
-                    SummaryView()
-                } else {
-                    PairingView()
-                }
-            }
+            rootView
         }
         .task {
             await store.bootstrapFromLaunchEnvironmentIfNeeded()
@@ -21,6 +15,74 @@ struct ContentView: View {
             }
         }
     }
+
+    @ViewBuilder
+    private var rootView: some View {
+        #if DEBUG
+        if let screen = store.simulatorPreviewScreen {
+            simulatorPreviewRoot(for: screen)
+        } else {
+            liveRoot
+        }
+        #else
+        liveRoot
+        #endif
+    }
+
+    @ViewBuilder
+    private var liveRoot: some View {
+        if store.isPaired {
+            SummaryView()
+        } else {
+            PairingView()
+        }
+    }
+
+    #if DEBUG
+    @ViewBuilder
+    private func simulatorPreviewRoot(for screen: SimulatorPreviewState) -> some View {
+        switch screen {
+        case .pairing, .revoked:
+            PairingView()
+        case .detail:
+            if let thread = store.selectedThread ?? store.summary?.threads.first {
+                ThreadDetailView(thread: thread)
+            } else {
+                SummaryView()
+            }
+        case .detailMessages:
+            if let thread = store.selectedThread ?? store.summary?.threads.first {
+                ThreadDetailMessagesPreviewView(thread: thread)
+            } else {
+                SummaryView()
+            }
+        case .detailActions:
+            if let thread = store.selectedThread ?? store.summary?.threads.first {
+                ThreadDetailActionsPreviewView(thread: thread)
+            } else {
+                SummaryView()
+            }
+        case .attention:
+            AttentionView()
+        case .attentionDetail:
+            if let item = store.attention?.items.first {
+                AttentionDetailView(item: item)
+            } else {
+                AttentionView()
+            }
+        case .attentionActions:
+            if let item = store.attention?.items.first {
+                AttentionActionsPreviewView(item: item)
+            } else {
+                AttentionView()
+            }
+        case .start:
+            StartThreadView()
+        case .summary, .empty, .offline, .error:
+            SummaryView()
+        }
+    }
+    #endif
 }
 
 struct PairingView: View {
@@ -86,6 +148,23 @@ struct SummaryView: View {
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
+                if summary.capabilities.attentionCount > 0 {
+                    Section("Attention") {
+                        NavigationLink(destination: AttentionView()) {
+                            HStack {
+                                StatusDot(status: "waiting_approval")
+                                Text("\(summary.capabilities.attentionCount) pending")
+                            }
+                        }
+                    }
+                }
+                if summary.capabilities.canStartThread {
+                    Section {
+                        NavigationLink(destination: StartThreadView()) {
+                            Label("New thread", systemImage: "plus.circle")
+                        }
+                    }
+                }
                 Section("Threads") {
                     if summary.threads.isEmpty {
                         HStack {
@@ -133,6 +212,214 @@ struct SummaryView: View {
                 }
             }
         )
+    }
+}
+
+struct AttentionView: View {
+    @EnvironmentObject private var store: AgentPulseStore
+
+    var body: some View {
+        List {
+            if store.isLoadingAttention {
+                ProgressView()
+            }
+            ForEach(store.attention?.items ?? []) { item in
+                NavigationLink(destination: AttentionDetailView(item: item)) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            StatusDot(status: item.riskLevel == "high" ? "error" : "waiting_approval")
+                            Text(item.approvalType)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        Text(item.threadTitle)
+                            .lineLimit(2)
+                        Text(item.summary)
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .lineLimit(3)
+                    }
+                }
+            }
+            if (store.attention?.items ?? []).isEmpty && !store.isLoadingAttention {
+                HStack {
+                    Spacer()
+                    WatchLogoMark(size: 34)
+                    Spacer()
+                }
+            }
+            if let error = store.errorMessage {
+                Text(error)
+                    .foregroundColor(.red)
+            }
+        }
+        .navigationTitle("Attention")
+        .task {
+            await store.loadAttention()
+        }
+        .refreshable {
+            await store.loadAttention()
+        }
+    }
+}
+
+struct AttentionDetailView: View {
+    @EnvironmentObject private var store: AgentPulseStore
+    let item: WatchAttentionItem
+    @State private var answer = ""
+    @State private var confirmation: WatchAttentionDecision?
+
+    var body: some View {
+        List {
+            Section(item.approvalType) {
+                Text(item.threadTitle)
+                    .font(.headline)
+                Text(item.summary)
+                if let detail = item.detail {
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+                Text(item.riskLevel)
+                    .font(.caption2)
+                    .foregroundColor(item.riskLevel == "high" ? .red : .secondary)
+            }
+            if let question = item.questions?.first {
+                Section("Answer") {
+                    Text(question.prompt)
+                    if let options = question.options, !options.isEmpty {
+                        ForEach(options) { option in
+                            Button(option.label) {
+                                answer = option.label
+                                confirmation = answerDecision
+                            }
+                        }
+                    } else {
+                        TextField("Answer", text: $answer)
+                    }
+                }
+            }
+            Section("Actions") {
+                ForEach(item.decisions) { decision in
+                    Button(decision.label) {
+                        confirmation = decision
+                    }
+                    .foregroundColor(decision.style == "destructive" ? .red : nil)
+                }
+            }
+            if let error = store.errorMessage {
+                Text(error)
+                    .foregroundColor(.red)
+            }
+        }
+        .navigationTitle("Review")
+        .confirmationDialog(
+            confirmation?.label ?? "Confirm",
+            isPresented: Binding(
+                get: { confirmation != nil },
+                set: { if !$0 { confirmation = nil } }
+            )
+        ) {
+            if let selectedDecision = confirmation {
+                Button(selectedDecision.label, role: selectedDecision.style == "destructive" ? .destructive : nil) {
+                    let decision = selectedDecision
+                    self.confirmation = nil
+                    Task { await store.respondToAttention(item, decision: decision, answer: answer) }
+                }
+                Button("Cancel", role: .cancel) {
+                    self.confirmation = nil
+                }
+            }
+        }
+    }
+
+    private var answerDecision: WatchAttentionDecision {
+        if let decision = item.decisions.first(where: { $0.id == "approve" }) {
+            return decision
+        }
+        return WatchAttentionDecision(id: "approve", label: "Answer", style: "primary")
+    }
+}
+
+#if DEBUG
+struct AttentionActionsPreviewView: View {
+    let item: WatchAttentionItem
+
+    var body: some View {
+        List {
+            Section("Actions") {
+                ForEach(item.decisions) { decision in
+                    Text(decision.label)
+                        .foregroundColor(decision.style == "destructive" ? .red : nil)
+                }
+            }
+            Section("Confirmation") {
+                Text("Every Watch approval requires explicit confirmation before it is sent to Codex app-server.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .navigationTitle("Review")
+    }
+}
+#endif
+
+struct StartThreadView: View {
+    @EnvironmentObject private var store: AgentPulseStore
+    @State private var confirmation: AgentPulseProject?
+
+    var body: some View {
+        List {
+            if store.isLoadingProjects {
+                ProgressView()
+            }
+            ForEach(store.projects) { project in
+                Button {
+                    confirmation = project
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(project.name)
+                        Text(project.path)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+            }
+            if store.projects.isEmpty && !store.isLoadingProjects {
+                Text("No Codex projects")
+                    .foregroundColor(.secondary)
+            }
+            if let error = store.errorMessage {
+                Text(error)
+                    .foregroundColor(.red)
+            }
+        }
+        .navigationTitle("New")
+        .task {
+            await store.loadProjects()
+        }
+        .refreshable {
+            await store.loadProjects()
+        }
+        .confirmationDialog(
+            "Start Codex thread",
+            isPresented: Binding(
+                get: { confirmation != nil },
+                set: { if !$0 { confirmation = nil } }
+            )
+        ) {
+            if let selectedProject = confirmation {
+                Button("Start in \(selectedProject.name)") {
+                    let project = selectedProject
+                    self.confirmation = nil
+                    Task { await store.startThread(project: project) }
+                }
+                Button("Cancel", role: .cancel) {
+                    self.confirmation = nil
+                }
+            }
+        }
     }
 }
 

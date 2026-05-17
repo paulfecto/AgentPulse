@@ -1483,6 +1483,308 @@ describe('Agent Pulse helper API', () => {
     }
   });
 
+  it('returns app-server approval and user-input requests in the watch attention surface', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const pendingRequests: PendingApprovalRequest[] = [
+      {
+        id: '42',
+        method: 'item/tool/requestUserInput',
+        params: {
+          threadId: 'thread-approval',
+          turnId: 'turn-7',
+          questions: [
+            {
+              id: 'target',
+              question: 'Which target should I deploy?',
+              options: [
+                { id: 'beta', label: 'Beta' },
+                { id: 'local', label: 'Local' }
+              ]
+            }
+          ]
+        },
+        turnId: 'turn-7'
+      },
+      {
+        id: '43',
+        method: 'item/commandExecution/requestApproval',
+        params: {
+          threadId: 'thread-approval',
+          turnId: 'turn-7',
+          reason: 'Run deploy smoke test?',
+          command: 'pnpm test'
+        },
+        turnId: 'turn-7'
+      }
+    ];
+    const thread: Thread = {
+      threadId: 'thread-approval',
+      provider: 'codex',
+      title: 'Codex mobile parity',
+      workspace: 'AgentPulse',
+      workspacePath: '/private/provider/path',
+      status: 'waiting_approval',
+      lastActivityAt: '2026-05-16T12:00:00Z',
+      lastTurnSummary: 'Needs attention.'
+    };
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: false,
+      remoteAccess: remoteAccessSettings()
+    };
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore: { save: vi.fn(), load: vi.fn() } as unknown as HelperSettingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: { listThreads: async () => [thread] },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      appServer: {
+        isConnected: () => true,
+        readTranscript: vi.fn(),
+        sendMessage: vi.fn(),
+        isThreadWaitingForApproval: (threadId: string) => threadId === 'thread-approval',
+        getPendingApprovalRequests: (threadId: string) => threadId === 'thread-approval' ? pendingRequests : []
+      },
+      desktopControlDisabled: true,
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      const summary = await fetch(`${server.url}/watch/summary`, {
+        headers: authHeaders(token, deviceId)
+      });
+      await expect(summary.json()).resolves.toMatchObject({
+        capabilities: {
+          canApprove: true,
+          canAnswerUserInput: true,
+          attentionCount: 2
+        }
+      });
+
+      const response = await fetch(`${server.url}/watch/attention`, {
+        headers: authHeaders(token, deviceId)
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.total).toBe(2);
+      expect(body.items).toEqual([
+        expect.objectContaining({
+          requestId: '43',
+          method: 'item/commandExecution/requestApproval',
+          approvalType: 'Command approval',
+          summary: 'Run deploy smoke test?',
+          detail: 'pnpm test',
+          decisions: expect.arrayContaining([
+            expect.objectContaining({ id: 'approve', label: 'Approve' }),
+            expect.objectContaining({ id: 'deny', style: 'destructive' })
+          ])
+        }),
+        expect.objectContaining({
+          requestId: '42',
+          method: 'item/tool/requestUserInput',
+          approvalType: 'Question',
+          questions: [
+            expect.objectContaining({
+              id: 'target',
+              prompt: 'Which target should I deploy?',
+              options: [
+                { id: 'beta', label: 'Beta' },
+                { id: 'local', label: 'Local' }
+              ]
+            })
+          ],
+          decisions: expect.arrayContaining([
+            expect.objectContaining({ id: 'approve', label: 'Answer' }),
+            expect.objectContaining({ id: 'skip', style: 'destructive' })
+          ])
+        })
+      ]);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('records Codex approval decisions through app-server when desktop control is disabled', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const openerExecFile = vi.fn((_command, _args, callback) => callback(null));
+    const respondToApproval = vi.fn(async () => undefined);
+    const pendingRequest: PendingApprovalRequest = {
+      id: '42',
+      method: 'item/fileChange/requestApproval',
+      params: {
+        threadId: 'thread-approval',
+        turnId: 'turn-7',
+        itemId: 'file-change-1',
+        reason: 'Apply file changes?'
+      },
+      turnId: 'turn-7',
+      itemId: 'file-change-1'
+    };
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: false,
+      remoteAccess: remoteAccessSettings()
+    };
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore: { save: vi.fn(), load: vi.fn() } as unknown as HelperSettingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: {
+        listThreads: async () => [
+          {
+            threadId: 'thread-approval',
+            provider: 'codex',
+            title: 'Approval route',
+            workspace: 'AgentPulse',
+            status: 'waiting_approval',
+            lastActivityAt: '2026-05-16T12:00:00Z',
+            lastTurnSummary: 'Needs approval.'
+          }
+        ]
+      },
+      opener: createThreadOpener({ execFile: openerExecFile }),
+      appServer: {
+        isConnected: () => true,
+        readTranscript: vi.fn(),
+        sendMessage: vi.fn(),
+        isThreadWaitingForApproval: (threadId: string) => threadId === 'thread-approval',
+        getPendingApprovalRequests: (threadId: string) => threadId === 'thread-approval' ? [pendingRequest] : [],
+        respondToApproval
+      },
+      desktopControlDisabled: true,
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      const response = await fetch(`${server.url}/threads/thread-approval/approvals/42`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders(token, deviceId),
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          method: 'item/fileChange/requestApproval',
+          decision: 'accept'
+        })
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(respondToApproval).toHaveBeenCalledWith(
+        'thread-approval',
+        '42',
+        'item/fileChange/requestApproval',
+        'accept'
+      );
+      expect(openerExecFile).not.toHaveBeenCalled();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('starts Watch-created Codex threads from known project ids only', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const projectDir = mkVisibleProjectDir();
+    const startThread = vi.fn(async (): Promise<Thread> => ({
+      threadId: 'thread-new-watch',
+      provider: 'codex',
+      title: 'New Watch thread',
+      workspace: 'AgentPulse',
+      workspacePath: projectDir,
+      status: 'idle',
+      lastActivityAt: '2026-05-16T12:00:00Z',
+      lastTurnSummary: ''
+    }));
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: false,
+      remoteAccess: remoteAccessSettings()
+    };
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore: { save: vi.fn(), load: vi.fn() } as unknown as HelperSettingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: {
+        listThreads: async () => [],
+        listProjects: async () => [
+          {
+            projectId: 'project-agent-pulse',
+            name: 'AgentPulse',
+            path: projectDir,
+            providers: ['codex']
+          }
+        ]
+      },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      appServer: {
+        isConnected: () => true,
+        readTranscript: vi.fn(),
+        sendMessage: vi.fn(),
+        startThread
+      },
+      desktopControlDisabled: true,
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      const response = await fetch(`${server.url}/threads/new`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders(token, deviceId),
+          'content-type': 'application/json',
+          'x-agent-pulse-client': 'watch'
+        },
+        body: JSON.stringify({
+          provider: 'codex',
+          projectId: 'project-agent-pulse',
+          permissionMode: 'default'
+        })
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        thread: {
+          threadId: 'thread-new-watch',
+          workspace: 'AgentPulse'
+        }
+      });
+      expect(startThread).toHaveBeenCalledWith(projectDir, { permissionMode: 'default' });
+
+      const unsafePathResponse = await fetch(`${server.url}/threads/new`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders(token, deviceId),
+          'content-type': 'application/json',
+          'x-agent-pulse-client': 'watch'
+        },
+        body: JSON.stringify({
+          provider: 'codex',
+          cwd: projectDir
+        })
+      });
+      expect(unsafePathResponse.status).toBe(400);
+      expect(startThread).toHaveBeenCalledTimes(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('delivers one watch push per relevant status transition', async () => {
     const registry = new DeviceRegistry(new MemoryDeviceStore());
     const pairing = new PairingManager(registry);

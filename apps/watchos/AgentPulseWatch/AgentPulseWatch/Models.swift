@@ -47,6 +47,13 @@ struct WatchSummaryResponse: Decodable {
     struct Capabilities: Decodable {
         let canOpenOnMac: Bool
         let openOnMacReason: String?
+        let canRespond: Bool
+        let canStop: Bool
+        let canApprove: Bool
+        let canAnswerUserInput: Bool
+        let canStartThread: Bool
+        let canReviewArtifacts: Bool
+        let attentionCount: Int
     }
 
     let server: Server
@@ -72,19 +79,40 @@ struct WatchThread: Identifiable, Decodable, Hashable {
 
 struct ThreadTranscript: Decodable {
     let threadId: String
+    let provider: String?
+    let providerThreadId: String?
     let activeTurnId: String?
     let sendState: ThreadSendState?
+    let goal: ThreadGoal?
+    let model: String?
+    let reasoningEffort: String?
+    let permissionMode: CodexPermissionMode?
+    let fileChanges: [ThreadFileChangeSummary]?
     let messages: [ChatMessage]
 
     init(
         threadId: String,
+        provider: String? = nil,
+        providerThreadId: String? = nil,
         activeTurnId: String? = nil,
         sendState: ThreadSendState? = nil,
+        goal: ThreadGoal? = nil,
+        model: String? = nil,
+        reasoningEffort: String? = nil,
+        permissionMode: CodexPermissionMode? = nil,
+        fileChanges: [ThreadFileChangeSummary]? = nil,
         messages: [ChatMessage]
     ) {
         self.threadId = threadId
+        self.provider = provider
+        self.providerThreadId = providerThreadId
         self.activeTurnId = activeTurnId
         self.sendState = sendState
+        self.goal = goal
+        self.model = model
+        self.reasoningEffort = reasoningEffort
+        self.permissionMode = permissionMode
+        self.fileChanges = fileChanges
         self.messages = messages
     }
 }
@@ -113,7 +141,149 @@ struct ChatMessage: Identifiable, Decodable {
     let role: String
     let kind: String
     let text: String?
+    let attachments: [ChatAttachment]?
+    let fileReferences: [ThreadFileReference]?
+    let phase: String?
+    let planItems: [ThreadPlanItem]?
+    let turnId: String?
     let createdAt: String
+
+    init(
+        id: String,
+        role: String,
+        kind: String,
+        text: String?,
+        attachments: [ChatAttachment]? = nil,
+        fileReferences: [ThreadFileReference]? = nil,
+        phase: String? = nil,
+        planItems: [ThreadPlanItem]? = nil,
+        turnId: String? = nil,
+        createdAt: String
+    ) {
+        self.id = id
+        self.role = role
+        self.kind = kind
+        self.text = text
+        self.attachments = attachments
+        self.fileReferences = fileReferences
+        self.phase = phase
+        self.planItems = planItems
+        self.turnId = turnId
+        self.createdAt = createdAt
+    }
+}
+
+struct ChatAttachment: Identifiable, Decodable {
+    let id: String
+    let kind: String
+    let url: String
+    let alt: String?
+    let mimeType: String?
+}
+
+struct ThreadFileReference: Identifiable, Decodable {
+    let id: String
+    let label: String
+    let displayPath: String
+    let kind: String
+    let language: String?
+    let messageId: String?
+    let turnId: String?
+    let source: String
+}
+
+struct ThreadPlanItem: Decodable {
+    let step: String
+    let status: String
+}
+
+struct ThreadGoal: Decodable {
+    let objective: String
+    let status: String
+    let tokenBudget: Int?
+    let tokensUsed: Int?
+}
+
+struct CodexPermissionMode: Decodable {
+    let mode: String
+    let label: String
+}
+
+struct ThreadFileChangeSummary: Identifiable, Decodable {
+    let id: String
+    let threadId: String
+    let turnId: String?
+    let itemId: String?
+    let fileCount: Int
+    let linesAdded: Int
+    let linesDeleted: Int
+    let files: [ThreadFileChangeFile]
+    let action: String?
+    let canUseCodexApplyPatch: Bool?
+    let unavailableReason: String?
+}
+
+struct ThreadFileChangeFile: Decodable {
+    let path: String
+    let linesAdded: Int
+    let linesDeleted: Int
+    let reference: ThreadFileReference?
+}
+
+struct WatchAttentionResponse: Decodable {
+    let items: [WatchAttentionItem]
+    let total: Int
+}
+
+struct WatchAttentionItem: Identifiable, Decodable, Hashable {
+    let id: String
+    let requestId: String
+    let threadId: String
+    let provider: String
+    let threadTitle: String
+    let workspace: String
+    let method: String
+    let approvalType: String
+    let summary: String
+    let detail: String?
+    let riskLevel: String
+    let questions: [WatchAttentionQuestion]?
+    let decisions: [WatchAttentionDecision]
+    let createdAt: String
+}
+
+struct WatchAttentionQuestion: Identifiable, Decodable, Hashable {
+    let id: String
+    let prompt: String
+    let options: [WatchAttentionQuestionOption]?
+}
+
+struct WatchAttentionQuestionOption: Identifiable, Decodable, Hashable {
+    let id: String
+    let label: String
+}
+
+struct WatchAttentionDecision: Identifiable, Decodable, Hashable {
+    let id: String
+    let label: String
+    let style: String
+}
+
+struct ProjectListResponse: Decodable {
+    let projects: [AgentPulseProject]
+}
+
+struct AgentPulseProject: Identifiable, Decodable, Hashable {
+    let projectId: String
+    let name: String
+    let path: String
+    let providers: [String]
+
+    var id: String { projectId }
+}
+
+struct ThreadCreateResponse: Decodable {
+    let thread: WatchThread
 }
 
 struct WatchPushRequest: Encodable {
@@ -126,9 +296,41 @@ struct ThreadMessageRequest: Encodable {
     let text: String
 }
 
+struct ThreadCreateRequest: Encodable {
+    let provider = "codex"
+    let projectId: String
+    let permissionMode = "default"
+}
+
+struct ApprovalDecisionRequest: Encodable {
+    let method: String
+    let decision: JSONValue
+}
+
 struct ThreadOpenRequest: Encodable {
     let threadId: String
     let mode: String?
+}
+
+indirect enum JSONValue: Encodable {
+    case string(String)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value):
+            try container.encode(value)
+        case .object(let value):
+            try container.encode(value)
+        case .array(let value):
+            try container.encode(value)
+        case .null:
+            try container.encodeNil()
+        }
+    }
 }
 
 enum AgentPulseWatchError: LocalizedError {

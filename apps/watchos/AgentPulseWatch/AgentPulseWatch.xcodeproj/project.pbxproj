@@ -15,7 +15,35 @@
 		2A0000010000000000000006 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A0000010000000000000106 /* KeychainStore.swift */; };
 		2A0000010000000000000007 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A0000010000000000000107 /* Models.swift */; };
 		2A0000010000000000000008 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2A000001000000000000010A /* Assets.xcassets */; };
+		33002C1B8EA3F594EDACA04B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 59FFF71B8DDE62448EC76F55 /* Assets.xcassets */; };
+		63C74F53F3D2F405EB35AC62 /* AgentPulseWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 2A0000010000000000000110 /* AgentPulseWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		714319758F4CDFFDF916A6A8 /* AgentPulseMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBD745D5145CBF959325FFD6 /* AgentPulseMobileApp.swift */; };
+		AB8141C05EFAA36B5AFE1C0A /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2C2CBEA0B9CD005B148826FC /* Foundation.framework */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		29F1F6F8E1B222C653896FC1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2A0000010000000000000501 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2A0000010000000000000401;
+			remoteInfo = AgentPulseWatch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		EF1A19CDC39000C83BCA1DB4 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				63C74F53F3D2F405EB35AC62 /* AgentPulseWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		2A0000010000000000000101 /* AgentPulseWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPulseWatchApp.swift; sourceTree = "<group>"; };
@@ -29,6 +57,11 @@
 		2A0000010000000000000109 /* AgentPulseWatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AgentPulseWatch.entitlements; sourceTree = "<group>"; };
 		2A000001000000000000010A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		2A0000010000000000000110 /* AgentPulseWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentPulseWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2C2CBEA0B9CD005B148826FC /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS14.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		471150E3BE1CD54310A5DE76 /* AgentPulseMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentPulseMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		59FFF71B8DDE62448EC76F55 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		FAD53EDD9EE8262CB4345AE0 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		FBD745D5145CBF959325FFD6 /* AgentPulseMobileApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentPulseMobileApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -36,6 +69,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBC9D42CAF11590857F07733 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AB8141C05EFAA36B5AFE1C0A /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -47,6 +88,8 @@
 			children = (
 				2A0000010000000000000302 /* AgentPulseWatch */,
 				2A0000010000000000000303 /* Products */,
+				53F20954CF48DBB124BE17E6 /* AgentPulseiOS */,
+				E6805359EA575653D3C1402A /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -71,13 +114,60 @@
 			isa = PBXGroup;
 			children = (
 				2A0000010000000000000110 /* AgentPulseWatch.app */,
+				471150E3BE1CD54310A5DE76 /* AgentPulseMobile.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		4C08596F75EBB42733609EDF /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				2C2CBEA0B9CD005B148826FC /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		53F20954CF48DBB124BE17E6 /* AgentPulseiOS */ = {
+			isa = PBXGroup;
+			children = (
+				FBD745D5145CBF959325FFD6 /* AgentPulseMobileApp.swift */,
+				FAD53EDD9EE8262CB4345AE0 /* Info.plist */,
+				59FFF71B8DDE62448EC76F55 /* Assets.xcassets */,
+			);
+			name = AgentPulseiOS;
+			path = AgentPulseiOS;
+			sourceTree = "<group>";
+		};
+		E6805359EA575653D3C1402A /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				4C08596F75EBB42733609EDF /* iOS */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		19B7DCE7BF801F0455A0996A /* AgentPulseMobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 32E84BAF7F58042E3FA10AA8 /* Build configuration list for PBXNativeTarget "AgentPulseMobile" */;
+			buildPhases = (
+				18DDFECB13505EB42682118E /* Sources */,
+				DBC9D42CAF11590857F07733 /* Frameworks */,
+				9BCA66512DF711B332745C07 /* Resources */,
+				EF1A19CDC39000C83BCA1DB4 /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				75AF37299798D76497B18639 /* PBXTargetDependency */,
+			);
+			name = AgentPulseMobile;
+			productName = AgentPulseMobile;
+			productReference = 471150E3BE1CD54310A5DE76 /* AgentPulseMobile.app */;
+			productType = "com.apple.product-type.application";
+		};
 		2A0000010000000000000401 /* AgentPulseWatch */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 2A0000010000000000000702 /* Build configuration list for PBXNativeTarget "AgentPulseWatch" */;
@@ -129,6 +219,7 @@
 			projectRoot = "";
 			targets = (
 				2A0000010000000000000401 /* AgentPulseWatch */,
+				19B7DCE7BF801F0455A0996A /* AgentPulseMobile */,
 			);
 		};
 /* End PBXProject section */
@@ -142,9 +233,25 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		9BCA66512DF711B332745C07 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				33002C1B8EA3F594EDACA04B /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		18DDFECB13505EB42682118E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				714319758F4CDFFDF916A6A8 /* AgentPulseMobileApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		2A0000010000000000000202 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -160,6 +267,15 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		75AF37299798D76497B18639 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = AgentPulseWatch;
+			target = 2A0000010000000000000401 /* AgentPulseWatch */;
+			targetProxy = 29F1F6F8E1B222C653896FC1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		2A0000010000000000000601 /* Debug */ = {
@@ -263,6 +379,7 @@
 		2A0000010000000000000603 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APS_ENVIRONMENT = development;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = AgentPulseWatch/AgentPulseWatch.entitlements;
@@ -277,7 +394,7 @@
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.paulfecto.AgentPulse.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = NO;
+				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = "watchos watchsimulator";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -289,6 +406,7 @@
 		2A0000010000000000000604 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APS_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = AgentPulseWatch/AgentPulseWatch.entitlements;
@@ -303,7 +421,7 @@
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.paulfecto.AgentPulse.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = NO;
+				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = "watchos watchsimulator";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -311,6 +429,59 @@
 				WATCHOS_DEPLOYMENT_TARGET = 8.0;
 			};
 			name = Release;
+		};
+		6A9430E02B4E86D17AA171E7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AgentPulseiOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.paulfecto.AgentPulse;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		F2930DA78CF4E495B1C7C479 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AgentPulseiOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.paulfecto.AgentPulse;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
 		};
 /* End XCBuildConfiguration section */
 
@@ -329,6 +500,15 @@
 			buildConfigurations = (
 				2A0000010000000000000603 /* Debug */,
 				2A0000010000000000000604 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		32E84BAF7F58042E3FA10AA8 /* Build configuration list for PBXNativeTarget "AgentPulseMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6A9430E02B4E86D17AA171E7 /* Release */,
+				F2930DA78CF4E495B1C7C479 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

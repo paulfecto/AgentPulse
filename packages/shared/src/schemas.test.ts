@@ -15,6 +15,8 @@ import {
   ThreadMessageRequestSchema,
   ThreadTranscriptSchema,
   ThreadSchema,
+  WatchAttentionResponseSchema,
+  WatchSummaryResponseSchema,
   maskToken
 } from './index';
 
@@ -164,6 +166,70 @@ describe('shared schemas', () => {
 
     expect(settings.mode).toBe('edge');
     expect(settings.publicUrl).toBe('https://beta.dope-ai.kr/agent-pulse');
+  });
+
+  it('validates watch remote-control summary and attention payloads', () => {
+    const summary = WatchSummaryResponseSchema.parse({
+      server: {
+        helperName: 'Agent Pulse',
+        version: '0.1.0',
+        baseUrl: 'http://127.0.0.1:55110',
+        remoteUrl: 'https://beta.dope-ai.kr/agent-pulse'
+      },
+      remoteAccess: {
+        enabled: true,
+        mode: 'edge',
+        status: 'healthy',
+        publicUrl: 'https://beta.dope-ai.kr/agent-pulse',
+        hostname: 'beta.dope-ai.kr'
+      },
+      capabilities: {
+        canOpenOnMac: false,
+        canRespond: true,
+        canStop: true,
+        canApprove: true,
+        canAnswerUserInput: true,
+        canStartThread: true,
+        canReviewArtifacts: true,
+        attentionCount: 1
+      },
+      threads: []
+    });
+
+    expect(summary.capabilities.canApprove).toBe(true);
+    expect(summary.capabilities.attentionCount).toBe(1);
+
+    const attention = WatchAttentionResponseSchema.parse({
+      total: 1,
+      items: [
+        {
+          id: 'thread-1:42',
+          requestId: '42',
+          threadId: 'thread-1',
+          provider: 'codex',
+          threadTitle: 'Deploy Agent Pulse',
+          workspace: 'AgentPulse',
+          method: 'item/tool/requestUserInput',
+          approvalType: 'Question',
+          summary: 'Which deployment target?',
+          riskLevel: 'low',
+          questions: [
+            {
+              id: 'target',
+              prompt: 'Which deployment target?',
+              options: [
+                { id: 'beta', label: 'Beta' },
+                { id: 'local', label: 'Local' }
+              ]
+            }
+          ],
+          decisions: [{ id: 'skip', label: 'Skip', style: 'destructive' }],
+          createdAt: '2026-05-16T12:00:00Z'
+        }
+      ]
+    });
+
+    expect(attention.items[0].questions?.[0].options?.[0].id).toBe('beta');
   });
 
   it('validates imported Codex themes for appearance settings', () => {

@@ -14,6 +14,7 @@
     "watch:remote": "bash ./scripts/watch-remote-helper.sh",
     "watch:beta": "bash ./scripts/macmini3/run-agentpulse-beta-helper.sh",
     "watch:beta:check": "bash ./scripts/macmini3/check-agentpulse-beta.sh",
+    "watch:testflight": "bash ./scripts/verify/archive_watch_testflight.sh",
     "package:npm": "pnpm build && node scripts/package-npm.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",

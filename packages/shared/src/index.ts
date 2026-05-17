@@ -732,7 +732,14 @@ export const WatchSummaryResponseSchema = z.object({
   }),
   capabilities: z.object({
     canOpenOnMac: z.boolean(),
-    openOnMacReason: z.string().min(1).optional()
+    openOnMacReason: z.string().min(1).optional(),
+    canRespond: z.boolean().default(true),
+    canStop: z.boolean().default(true),
+    canApprove: z.boolean().default(true),
+    canAnswerUserInput: z.boolean().default(true),
+    canStartThread: z.boolean().default(true),
+    canReviewArtifacts: z.boolean().default(true),
+    attentionCount: z.number().int().nonnegative().default(0)
   }),
   threads: z.array(WatchSummaryThreadSchema).max(32)
 });
@@ -871,6 +878,49 @@ export const ApprovalInboxResponseSchema = z.object({
   items: z.array(ApprovalInboxItemSchema),
   total: z.number().int().nonnegative()
 });
+
+export const WatchAttentionDecisionSchema = z.object({
+  id: z.enum(['approve', 'approve_for_session', 'deny', 'cancel', 'skip']),
+  label: z.string().min(1),
+  style: z.enum(['primary', 'secondary', 'destructive']).default('secondary')
+});
+
+export const WatchAttentionQuestionOptionSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1)
+});
+
+export const WatchAttentionQuestionSchema = z.object({
+  id: z.string().min(1),
+  prompt: z.string().min(1),
+  options: z.array(WatchAttentionQuestionOptionSchema).optional()
+});
+
+export const WatchAttentionItemSchema = z.object({
+  id: z.string().min(1),
+  requestId: z.string().min(1),
+  threadId: z.string().min(1),
+  provider: AgentProviderSchema,
+  threadTitle: z.string().min(1),
+  workspace: z.string().min(1),
+  method: z.string().min(1),
+  approvalType: z.string().min(1),
+  summary: z.string().min(1),
+  detail: z.string().min(1).optional(),
+  riskLevel: z.enum(['low', 'medium', 'high', 'unknown']),
+  questions: z.array(WatchAttentionQuestionSchema).optional(),
+  decisions: z.array(WatchAttentionDecisionSchema),
+  createdAt: isoUtcTimestamp
+});
+
+export type WatchAttentionItem = z.infer<typeof WatchAttentionItemSchema>;
+
+export const WatchAttentionResponseSchema = z.object({
+  items: z.array(WatchAttentionItemSchema),
+  total: z.number().int().nonnegative()
+});
+
+export type WatchAttentionResponse = z.infer<typeof WatchAttentionResponseSchema>;
 
 export const TranscriptCommentDraftRequestSchema = z.object({
   messageId: z.string().min(1),

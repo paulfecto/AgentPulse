@@ -37,6 +37,24 @@ final class AgentPulseClient {
         try await get("/watch/summary", as: WatchSummaryResponse.self)
     }
 
+    func attention() async throws -> WatchAttentionResponse {
+        try await get("/watch/attention", as: WatchAttentionResponse.self)
+    }
+
+    func projects() async throws -> ProjectListResponse {
+        try await get("/projects/list", as: ProjectListResponse.self)
+    }
+
+    func startThread(projectId: String) async throws -> ThreadCreateResponse {
+        let data = try await request(
+            path: "/threads/new",
+            method: "POST",
+            body: ThreadCreateRequest(projectId: projectId),
+            watchClient: true
+        )
+        return try decoder.decode(ThreadCreateResponse.self, from: data)
+    }
+
     func transcript(threadId: String, limit: Int = 40) async throws -> ThreadTranscript {
         guard let encoded = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw AgentPulseWatchError.server("Invalid thread id.")
@@ -66,6 +84,24 @@ final class AgentPulseClient {
             watchClient: true
         )
         return try decoder.decode(ThreadMessageResponse.self, from: data)
+    }
+
+    func respondToApproval(
+        threadId: String,
+        requestId: String,
+        method: String,
+        decision: JSONValue
+    ) async throws {
+        guard let encodedThreadId = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let encodedRequestId = requestId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            throw AgentPulseWatchError.server("Invalid approval request.")
+        }
+        _ = try await request(
+            path: "/threads/\(encodedThreadId)/approvals/\(encodedRequestId)",
+            method: "POST",
+            body: ApprovalDecisionRequest(method: method, decision: decision),
+            watchClient: true
+        )
     }
 
     func stop(threadId: String) async throws {
