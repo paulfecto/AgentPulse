@@ -2864,7 +2864,7 @@ describe('Agent Pulse helper API', () => {
     }
   });
 
-  it('does not list a stale paused Codex thread as running when App Server shows no live turn', async () => {
+  it('uses authoritative App Server idle status without reading transcripts while listing threads', async () => {
     const registry = new DeviceRegistry(new MemoryDeviceStore());
     const pairing = new PairingManager(registry);
     const staleThread: Thread = {
@@ -2884,6 +2884,10 @@ describe('Agent Pulse helper API', () => {
     };
     const appServer = {
       isConnected: () => true,
+      listLoadedThreadStatuses: vi.fn(async () => new Map<string, Thread['status']>([
+        ['thread-paused', 'idle'],
+        ['thread-stale-error', 'idle']
+      ])),
       readTranscript: vi.fn(async (): Promise<ThreadTranscript> => ({
         threadId: 'thread-paused',
         activeTurnId: null,
@@ -2937,14 +2941,14 @@ describe('Agent Pulse helper API', () => {
           }
         ]
       });
-      expect(appServer.readTranscript).toHaveBeenCalledWith('thread-paused');
-      expect(appServer.readTranscript).toHaveBeenCalledWith('thread-stale-error');
+      expect(appServer.listLoadedThreadStatuses).toHaveBeenCalled();
+      expect(appServer.readTranscript).not.toHaveBeenCalled();
     } finally {
       await server.stop();
     }
   });
 
-  it('does not read old idle transcripts while reconciling stale active states', async () => {
+  it('does not read transcripts while reconciling stale active states from App Server status', async () => {
     const registry = new DeviceRegistry(new MemoryDeviceStore());
     const pairing = new PairingManager(registry);
     const oldIdleThread: Thread = {
@@ -2967,6 +2971,9 @@ describe('Agent Pulse helper API', () => {
     };
     const appServer = {
       isConnected: () => true,
+      listLoadedThreadStatuses: vi.fn(async () => new Map<string, Thread['status']>([
+        ['thread-stale-running', 'idle']
+      ])),
       readTranscript: vi.fn(async (threadId: string): Promise<ThreadTranscript> => ({
         threadId,
         activeTurnId: null,
@@ -3017,8 +3024,9 @@ describe('Agent Pulse helper API', () => {
           }
         ]
       });
+      expect(appServer.listLoadedThreadStatuses).toHaveBeenCalled();
       expect(appServer.readTranscript).not.toHaveBeenCalledWith('thread-old-idle');
-      expect(appServer.readTranscript).toHaveBeenCalledWith('thread-stale-running');
+      expect(appServer.readTranscript).not.toHaveBeenCalled();
     } finally {
       await server.stop();
     }
@@ -3085,7 +3093,7 @@ describe('Agent Pulse helper API', () => {
     }
   });
 
-  it('reconciles old idle threads when app-server reports them as loaded', async () => {
+  it('does not read loaded idle transcripts while listing threads', async () => {
     const registry = new DeviceRegistry(new MemoryDeviceStore());
     const pairing = new PairingManager(registry);
     const oldIdleThread: Thread = {
@@ -3146,18 +3154,18 @@ describe('Agent Pulse helper API', () => {
         threads: [
           {
             threadId: 'thread-old-loaded',
-            status: 'running'
+            status: 'idle'
           }
         ]
       });
-      expect(appServer.listLoadedThreadIds).toHaveBeenCalled();
-      expect(appServer.readTranscript).toHaveBeenCalledWith('thread-old-loaded');
+      expect(appServer.listLoadedThreadIds).not.toHaveBeenCalled();
+      expect(appServer.readTranscript).not.toHaveBeenCalled();
     } finally {
       await server.stop();
     }
   });
 
-  it('keeps a rollout-running thread running when app-server transcript still says ready', async () => {
+  it('keeps a rollout-running thread running when App Server has no authoritative idle status', async () => {
     const registry = new DeviceRegistry(new MemoryDeviceStore());
     const pairing = new PairingManager(registry);
     const runningThread: Thread = {
@@ -3299,7 +3307,7 @@ describe('Agent Pulse helper API', () => {
     }
   });
 
-  it('clears a recent running thread when app-server transcript has a completed assistant turn', async () => {
+  it('does not read a completed transcript while listing when App Server still reports running', async () => {
     const registry = new DeviceRegistry(new MemoryDeviceStore());
     const pairing = new PairingManager(registry);
     const runningThread: Thread = {
@@ -3370,11 +3378,12 @@ describe('Agent Pulse helper API', () => {
         threads: [
           {
             threadId: 'thread-finished-transcript',
-            status: 'idle'
+            status: 'running'
           }
         ]
       });
       expect(appServer.listLoadedThreadStatuses).toHaveBeenCalled();
+      expect(appServer.readTranscript).not.toHaveBeenCalled();
     } finally {
       await server.stop();
     }
@@ -8406,6 +8415,10 @@ describe('Agent Pulse helper API', () => {
         environment: 'sandbox'
       });
 
+      server.hub.broadcast({
+        type: 'thread/status/changed',
+        payload: { threadId: thread.threadId, status: 'running' }
+      } as LiveEvent);
       server.hub.broadcast({
         type: 'thread/status/changed',
         payload: { threadId: thread.threadId, status: 'waiting_approval' }

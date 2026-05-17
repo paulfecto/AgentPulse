@@ -56,6 +56,33 @@ JSON.
 - 2026-05-17: Docker `pnpm test`, `pnpm typecheck`, and `pnpm build` passed in
   an ephemeral container copy with the host repo mounted read-only. Test result:
   41 files / 555 tests passed.
+- 2026-05-17: Removed transcript reads from the list/poll path entirely. Watch
+  summary now trusts app-server live statuses for list state and keeps full
+  transcript reads on explicit thread detail requests.
+- 2026-05-17: Added a bounded file-preview basename search guard. The helper no
+  longer recursively scans `source-cache`/large data roots when decorating
+  transcript file references for Watch/tablet previews.
+- 2026-05-17: Local helper restart proof stayed responsive across repeated
+  health checks for 26 seconds, returned authenticated Watch summary with 32
+  real Codex-visible threads, and the macmini relay on `127.0.0.1:55112`
+  returned `codexAppServer: "connected"`.
+- 2026-05-17: Public route proof:
+  `https://beta.dope-ai.kr/agent-pulse/health/get` returned AgentPulse JSON with
+  `codexAppServer: "connected"`;
+  authenticated `https://beta.dope-ai.kr/agent-pulse/watch/summary` returned 32
+  threads with edited pinned titles (`CoWorkOS`, `commerceOS`,
+  `management tool`, `foundry`, `vox`, ...); `/thread/open` returned `403` with
+  `Codex desktop control is disabled for this Agent Pulse runtime.`
+- 2026-05-17: Public stress proof passed 30 iterations across public health,
+  authenticated Watch summary, and tablet shell. Every API response stayed JSON
+  and Project Manager health remained `healthy`.
+- 2026-05-17: Docker `pnpm test`, `pnpm typecheck`, and `pnpm build` passed in
+  an ephemeral container copy with the host repo mounted read-only. Test result:
+  41 files / 556 tests passed.
+- 2026-05-17: Physical Watch bootstrap/install retry is blocked by Apple
+  CoreDevice transport, not AgentPulse API: `devicectl` sees Paul’s Apple Watch
+  as paired with Developer Mode enabled, but the tunnel remains `connecting` and
+  install/launch fail with `CoreDeviceError 4000` / tunnel timeout.
 
 ## Changes
 
@@ -71,10 +98,13 @@ JSON.
 - Stop reading full/recent idle Codex transcripts during list/summary
   reconciliation, and bound rollout status reads to keep Watch summary
   responsive with very large Codex session logs.
+- Skip expensive bare-filename file-preview searches in large/generated data
+  roots such as `source-cache`, so opening full conversations cannot block the
+  helper event loop.
 
 ## Validation Log
 
-- Passed: Docker `pnpm test` with 555 tests.
+- Passed: Docker `pnpm test` with 556 tests.
 - Passed: Docker `pnpm typecheck`.
 - Passed: Docker `pnpm build`.
 - Passed: Watch simulator Xcode build.
@@ -82,8 +112,13 @@ JSON.
 - Passed: physical Watch install and launch.
 - Passed: local relayed helper authenticated Watch summary returns Codex-visible
   pinned threads with edited titles.
-- Pending: push/deploy relay topology to macmini3 public route, then bootstrap or
-  refresh the physical Watch session against the relayed helper device.
+- Passed: public beta route returns AgentPulse JSON and authenticated Watch
+  summary for `https://beta.dope-ai.kr/agent-pulse`.
+- Passed: public route stress loop, 30 iterations, no Project Manager HTML in
+  AgentPulse APIs.
+- Blocked: physical Watch install/bootstrap through Xcode CoreDevice. The Watch
+  is paired and Developer Mode is enabled, but Apple’s local-network device
+  tunnel disconnects before install/launch.
 
 ## Completion State
 

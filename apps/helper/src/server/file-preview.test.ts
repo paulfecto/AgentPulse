@@ -92,6 +92,15 @@ describe('file preview helpers', () => {
     expect(transcript.messages[0]?.fileReferences).toBeUndefined();
   });
 
+  it('does not recursively scan source-cache data roots for bare filenames', () => {
+    const workspace = createWorkspace({
+      'data/source-cache/2025-06-30/naver-investor/nested/report.ts': 'export const slow = true;\n'
+    });
+    const sourceCacheRoot = path.join(workspace, 'data', 'source-cache', '2025-06-30', 'naver-investor');
+
+    expect(resolveThreadFileReferenceCandidate('report.ts', sourceCacheRoot)).toBeUndefined();
+  });
+
   it('attaches preview references to file-change rows', () => {
     const workspace = createWorkspace({
       'docs/CHANGELOG.md': '# Changelog\n'

@@ -15,6 +15,7 @@ import {
 } from '@agent-pulse/shared';
 
 export const MAX_FILE_PREVIEW_BYTES = 512 * 1024;
+const MAX_BASENAME_SEARCH_ENTRIES = 2_000;
 
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown', '.mdx']);
 
@@ -78,15 +79,31 @@ const PLAIN_FILE_PATH_PATTERN =
 const BARE_FILE_NAME_PATTERN =
   /(?:^|[\s("'[])([A-Za-z0-9_@()-]+\.[A-Za-z][A-Za-z0-9]+)(?=$|[\s"',.;:)\]])/g;
 const SKIPPED_BASENAME_SEARCH_DIRS = new Set([
+  '.cache',
+  '.claude',
+  '.codex',
   '.expo',
   '.git',
+  '.gradle',
+  '.mypy_cache',
   '.next',
   '.pnpm',
+  '.pytest_cache',
+  '.ruff_cache',
   '.turbo',
+  '.venv',
   'Pods',
+  '__pycache__',
   'build',
+  'coverage',
+  'data',
   'dist',
-  'node_modules'
+  'node_modules',
+  'source-cache',
+  'target',
+  'tmp',
+  'vendor',
+  'venv'
 ]);
 
 export class FilePreviewError extends Error {
@@ -435,14 +452,18 @@ function findUniqueFileByBasename(root: string, candidate: string): string | und
   if (candidate.includes('/') || candidate.includes(path.sep) || path.isAbsolute(candidate)) {
     return undefined;
   }
+  if (isUnsafeBasenameSearchRoot(root)) {
+    return undefined;
+  }
   const basename = path.basename(candidate);
   if (!isSupportedPreviewPath(basename)) {
     return undefined;
   }
   let match: string | undefined;
   let matchCount = 0;
+  let visitedEntries = 0;
   const visit = (dir: string, depth: number) => {
-    if (matchCount > 1 || depth > 8) {
+    if (matchCount > 1 || depth > 8 || visitedEntries > MAX_BASENAME_SEARCH_ENTRIES) {
       return;
     }
     let entries;
@@ -452,7 +473,8 @@ function findUniqueFileByBasename(root: string, candidate: string): string | und
       return;
     }
     for (const entry of entries) {
-      if (matchCount > 1) {
+      visitedEntries += 1;
+      if (matchCount > 1 || visitedEntries > MAX_BASENAME_SEARCH_ENTRIES) {
         return;
       }
       const entryPath = path.join(dir, entry.name);
@@ -473,6 +495,11 @@ function findUniqueFileByBasename(root: string, candidate: string): string | und
   };
   visit(root, 0);
   return matchCount === 1 ? match : undefined;
+}
+
+function isUnsafeBasenameSearchRoot(root: string): boolean {
+  const parts = path.normalize(root).split(path.sep).filter(Boolean);
+  return parts.some((part) => part === 'source-cache' || part === 'node_modules');
 }
 
 function cleanCandidatePath(candidate: string | undefined): string | undefined {

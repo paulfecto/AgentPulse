@@ -81,7 +81,6 @@ import {
   SeenThreadActivityMarkRequestSchema,
   SeenThreadActivityResponseSchema,
   maskToken,
-  resolveThreadStatus,
   type CollaborationModeKind,
   type AgentProvider,
   type AppearanceSettings,
@@ -459,8 +458,7 @@ export async function startAgentPulseServer(
     options.appServer,
     options.mirror,
     workspaceDisplayRoots,
-    options.chatRoot,
-    transformTranscript
+    options.chatRoot
   );
   const detachCatalog = options.catalog?.onChange((kind) => {
     hub.broadcast({ type: 'catalog/changed', payload: { kind } });
@@ -1324,8 +1322,7 @@ function createApp(
       await reconcileThreadStatuses(
         listedThreads,
         options.appServer,
-        options.mirror,
-        transformTranscript
+        options.mirror
       ),
       draftThreads
     ), options.chatRoot);
@@ -5458,9 +5455,6 @@ export class LiveEventHub {
 // 6s polling cadence: app-server notifications are the source of truth for live
 // working/ready state. This loop is only a slow backstop for thread/message list freshness.
 const POLL_INTERVAL_MS = 6_000;
-const ACTIVE_RECENCY_MS = 10 * 60_000;
-// Was 15 ticks at 2s = 30s between full sweeps. Keep that real-world cadence at the new rate.
-const FULL_SWEEP_EVERY_N_TICKS = 5;
 
 function startThreadPolling(
   threadProvider: { listThreads(): Promise<ThreadListProviderResult> },
@@ -5468,13 +5462,11 @@ function startThreadPolling(
   appServer: AppServerChatBridge | undefined,
   mirror: CodexMirrorBridge | undefined,
   workspaceDisplayRoots: WorkspaceDisplayRootResolver,
-  chatRoot: string | undefined,
-  transformTranscript?: (transcript: ThreadTranscript, threadId: string) => ThreadTranscript
+  chatRoot: string | undefined
 ) {
   let previous = new Map<string, string>();
   let previousStatuses = new Map<string, Thread['status']>();
   let inFlight = false;
-  let tickCount = 0;
 
   const tick = async () => {
     if (inFlight) {
@@ -5482,20 +5474,12 @@ function startThreadPolling(
     }
     inFlight = true;
     try {
-      tickCount += 1;
-      const fullSweep = tickCount % FULL_SWEEP_EVERY_N_TICKS === 1;
       // Prefer the new combined endpoint that returns ids + statuses in one round
-      // trip (openai/codex#11786). Fall back to listLoadedThreadIds for older
-      // Codex builds that only expose ids.
+      // trip (openai/codex#11786). Do not fall back to reading transcripts here:
+      // large Codex rollout files can block the Watch summary and public health path.
       const loadedStatuses = await appServer?.listLoadedThreadStatuses?.()
         .catch(() => undefined);
-      const loadedThreadIds =
-        loadedStatuses ?? (await appServer?.listLoadedThreadIds?.().catch(() => undefined));
       const liveStatuses = loadedStatuses instanceof Map ? loadedStatuses : undefined;
-      const loadedIdsSet =
-        loadedThreadIds instanceof Map
-          ? new Set(loadedThreadIds.keys())
-          : loadedThreadIds;
       const threads = await normalizeThreadsForWorkspaceDisplay(
         threadsFromProviderResult(await threadProvider.listThreads()).map((thread) =>
           applyAppServerLiveThreadStatus(thread, appServer, mirror, liveStatuses)
@@ -5503,23 +5487,13 @@ function startThreadPolling(
         workspaceDisplayRoots,
         chatRoot
       );
-      const toReconcile = threads.filter((thread) =>
-        shouldReconcileThread(thread, fullSweep, loadedIdsSet, { includeRecent: false })
-      );
-      const reconciledActive = await reconcileThreads(toReconcile, appServer, transformTranscript);
-
-      const reconciledById = new Map(
-        reconciledActive.map((entry) => [entry.thread.threadId, entry])
-      );
-      const reconciled: ReconciledThread[] = threads.map(
-        (thread) => reconciledById.get(thread.threadId) ?? { thread }
-      );
+      const reconciled: ReconciledThread[] = threads.map((thread) => ({ thread }));
 
       const next = new Map(
         reconciled.map(({ thread }) => [thread.threadId, JSON.stringify(thread)])
       );
 
-      for (const { thread, transcript } of reconciled) {
+      for (const { thread } of reconciled) {
         if (previous.get(thread.threadId) !== next.get(thread.threadId)) {
           hub.broadcast({ type: 'thread/upsert', payload: thread });
         }
@@ -5529,11 +5503,6 @@ function startThreadPolling(
             type: 'thread/status/changed',
             payload: { threadId: thread.threadId, status: thread.status }
           });
-        }
-        // Push transcripts for any thread we successfully reconciled. This keeps the tablet's
-        // last-known-good messages fresh without using app-server status as the live state.
-        if (transcript) {
-          hub.broadcast({ type: 'thread/transcript/changed', payload: transcript });
         }
       }
 
@@ -5559,96 +5528,18 @@ function startThreadPolling(
   return setInterval(() => void tick(), POLL_INTERVAL_MS);
 }
 
-type ReconciledThread = { thread: Thread; transcript?: ThreadTranscript };
-
-async function reconcileThreads(
-  threads: Thread[],
-  appServer: AppServerChatBridge | undefined,
-  transformTranscript?: (transcript: ThreadTranscript, threadId: string) => ThreadTranscript
-): Promise<ReconciledThread[]> {
-  if (!appServer) {
-    return threads.map((thread) => ({ thread }));
-  }
-
-  return Promise.all(
-    threads.map(async (thread): Promise<ReconciledThread> => {
-      try {
-        const rawTranscript = await appServer.readTranscript(thread.threadId);
-        const transcript = transformTranscript
-          ? transformTranscript(rawTranscript, thread.threadId)
-          : rawTranscript;
-        return {
-          thread: ThreadSchema.parse({
-            ...thread,
-            status: reconciledThreadStatus(thread, transcript)
-          }),
-          transcript
-        };
-      } catch {
-        return { thread };
-      }
-    })
-  );
-}
-
-function reconciledThreadStatus(thread: Thread, transcript: ThreadTranscript): Thread['status'] {
-  const transcriptStatus = statusFromTranscript(transcript);
-  if (transcriptStatus !== 'idle') {
-    return resolveThreadStatus([thread.status, transcriptStatus]);
-  }
-  if (transcriptHasCompletedAssistantTurn(transcript)) {
-    return 'idle';
-  }
-
-  const lastActivityMs = Date.parse(thread.lastActivityAt);
-  const isRecent =
-    Number.isFinite(lastActivityMs) && Date.now() - lastActivityMs < ACTIVE_RECENCY_MS;
-  return isRecent ? resolveThreadStatus([thread.status, transcriptStatus]) : transcriptStatus;
-}
-
-function transcriptHasCompletedAssistantTurn(transcript: ThreadTranscript): boolean {
-  let lastUserIndex = -1;
-  for (let index = transcript.messages.length - 1; index >= 0; index -= 1) {
-    const message = transcript.messages[index];
-    if (message?.role === 'user' && typeof message.turnId === 'string') {
-      lastUserIndex = index;
-      break;
-    }
-  }
-  if (lastUserIndex < 0) {
-    return false;
-  }
-
-  const turnId = transcript.messages[lastUserIndex]?.turnId;
-  if (!turnId) {
-    return false;
-  }
-
-  return transcript.messages
-    .slice(lastUserIndex + 1)
-    .some((message) => message.role === 'assistant' && message.turnId === turnId);
-}
+type ReconciledThread = { thread: Thread };
 
 async function reconcileThreadStatuses(
   threads: Thread[],
   appServer: AppServerChatBridge | undefined,
-  mirror: CodexMirrorBridge | undefined,
-  transformTranscript?: (transcript: ThreadTranscript, threadId: string) => ThreadTranscript
+  mirror: CodexMirrorBridge | undefined
 ): Promise<Thread[]> {
   const liveStatuses = await appServer?.listLoadedThreadStatuses?.().catch(() => undefined);
   const liveThreads = threads.map((thread) =>
     applyAppServerLiveThreadStatus(thread, appServer, mirror, liveStatuses)
   );
-  const loadedThreadIds =
-    liveStatuses ?? (await appServer?.listLoadedThreadIds?.().catch(() => undefined));
-  const loadedIdsSet =
-    loadedThreadIds instanceof Map ? new Set(loadedThreadIds.keys()) : loadedThreadIds;
-  const toReconcile = liveThreads.filter((thread) =>
-    shouldReconcileThread(thread, false, loadedIdsSet, { includeRecent: false })
-  );
-  const reconciled = await reconcileThreads(toReconcile, appServer, transformTranscript);
-  const byId = new Map(reconciled.map(({ thread }) => [thread.threadId, thread]));
-  return liveThreads.map((thread) => byId.get(thread.threadId) ?? thread);
+  return liveThreads;
 }
 
 function applyAppServerLiveThreadStatus(
@@ -6375,26 +6266,6 @@ function truncateForSummary(value: string, maxLength: number): string {
     return normalized;
   }
   return `${normalized.slice(0, Math.max(0, maxLength - 1)).trim()}...`;
-}
-
-function shouldReconcileThread(
-  thread: Thread,
-  fullSweep: boolean,
-  loadedThreadIds?: Set<string>,
-  options: { includeRecent?: boolean } = {}
-): boolean {
-  if (loadedThreadIds?.has(thread.threadId)) {
-    return true;
-  }
-  if (thread.status !== 'idle' && thread.status !== 'unknown') {
-    return true;
-  }
-  const lastActivityMs = Date.parse(thread.lastActivityAt);
-  if (!Number.isFinite(lastActivityMs)) {
-    return false;
-  }
-  const isRecent = Date.now() - lastActivityMs < ACTIVE_RECENCY_MS;
-  return (options.includeRecent === true && isRecent) || (fullSweep && thread.status === 'unknown');
 }
 
 function mergeDraftThreads(threads: Thread[], drafts: Map<string, Thread>): Thread[] {
