@@ -2695,6 +2695,7 @@ function createApp(
     const threadId = context.req.param('threadId');
     const messageLimit = parseTranscriptMessageLimit(context.req.query('limit'));
     const transcriptView = parseTranscriptView(context.req.query('view'));
+    const transcriptHistory = parseTranscriptHistory(context.req.query('history'));
     if (!isProviderEnabled(providerForThreadId(threadId))) {
       return disabledProviderResponse(context, providerForThreadId(threadId));
     }
@@ -2750,9 +2751,13 @@ function createApp(
 
     await settleWithin(ensureAppServerLiveSubscription(threadId), 750);
 
-    const TRANSCRIPT_READ_TIMEOUT_MS = 5_000;
+    const TRANSCRIPT_READ_TIMEOUT_MS = transcriptHistory === 'full' ? 8_000 : 5_000;
+    const readTranscript =
+      transcriptHistory === 'full' && options.appServer.readFullTranscript
+        ? options.appServer.readFullTranscript.bind(options.appServer)
+        : options.appServer.readTranscript.bind(options.appServer);
     const liveResult = await settleWithin(
-      options.appServer.readTranscript(threadId).catch(() => undefined),
+      readTranscript(threadId).catch(() => undefined),
       TRANSCRIPT_READ_TIMEOUT_MS
     );
 
@@ -4839,6 +4844,12 @@ type TranscriptView = 'default' | 'watch';
 
 function parseTranscriptView(raw: string | undefined): TranscriptView {
   return raw === 'watch' ? 'watch' : 'default';
+}
+
+type TranscriptHistory = 'recent' | 'full';
+
+function parseTranscriptHistory(raw: string | undefined): TranscriptHistory {
+  return raw === 'full' ? 'full' : 'recent';
 }
 
 function presentTranscriptForView(

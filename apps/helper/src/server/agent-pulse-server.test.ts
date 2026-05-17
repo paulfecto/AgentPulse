@@ -3790,6 +3790,93 @@ describe('Agent Pulse helper API', () => {
     }
   });
 
+  it('can back a limited transcript window with full Codex history for Watch detail', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const recentTranscript: ThreadTranscript = {
+      threadId: 'thread-1',
+      activeTurnId: null,
+      sendState: {
+        canSend: true,
+        reason: 'ready',
+        label: 'Ready'
+      },
+      messages: []
+    };
+    const fullTranscript: ThreadTranscript = {
+      ...recentTranscript,
+      messages: [
+        {
+          id: 'message-1',
+          role: 'user',
+          kind: 'message',
+          text: 'Open this thread on my Watch.',
+          createdAt: '2026-04-25T16:14:00Z'
+        },
+        {
+          id: 'message-2',
+          role: 'assistant',
+          kind: 'message',
+          text: 'The Watch detail should show this visible conversation text.',
+          createdAt: '2026-04-25T16:15:00Z'
+        }
+      ]
+    };
+    const appServer = {
+      isConnected: () => true,
+      readTranscript: vi.fn(async () => recentTranscript),
+      readFullTranscript: vi.fn(async () => fullTranscript),
+      sendMessage: vi.fn()
+    };
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: true,
+      remoteAccess: remoteAccessSettings()
+    };
+    const settingsStore = {
+      save: vi.fn(),
+      load: vi.fn()
+    } as unknown as HelperSettingsStore;
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: { listThreads: async () => [] },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      appServer,
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      const response = await fetch(`${server.url}/threads/thread-1/transcript?limit=40&history=full`, {
+        headers: authHeaders(token, deviceId)
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        threadId: 'thread-1',
+        messages: [
+          {
+            id: 'message-1',
+            text: 'Open this thread on my Watch.'
+          },
+          {
+            id: 'message-2',
+            text: 'The Watch detail should show this visible conversation text.'
+          }
+        ]
+      });
+      expect(appServer.readFullTranscript).toHaveBeenCalledWith('thread-1');
+      expect(appServer.readTranscript).not.toHaveBeenCalled();
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('can return a watch-safe transcript view that hides commentary and tool noise', async () => {
     const registry = new DeviceRegistry(new MemoryDeviceStore());
     const pairing = new PairingManager(registry);

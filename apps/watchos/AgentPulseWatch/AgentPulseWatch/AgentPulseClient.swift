@@ -59,7 +59,7 @@ final class AgentPulseClient {
         guard let encoded = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw AgentPulseWatchError.server("Invalid thread id.")
         }
-        return try await get("/threads/\(encoded)/transcript?limit=\(limit)", as: ThreadTranscript.self)
+        return try await get("/threads/\(encoded)/transcript?limit=\(limit)&history=full", as: ThreadTranscript.self)
     }
 
     func olderMessages(threadId: String, before messageId: String, limit: Int = 40) async throws -> OlderThreadMessagesResponse {
