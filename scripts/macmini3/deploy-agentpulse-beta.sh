@@ -12,9 +12,11 @@ public_url="${AGENT_PULSE_PUBLIC_URL:-https://beta.dope-ai.kr/agent-pulse}"
 public_base_path="${AGENT_PULSE_PUBLIC_BASE_PATH:-/agent-pulse/}"
 edge_port="${AGENT_PULSE_EDGE_PORT:-4355}"
 helper_port="${AGENT_PULSE_HELPER_PORT:-55110}"
+local_shared_url="${AGENT_PULSE_LOCAL_SHARED_URL:-http://127.0.0.1/agent-pulse}"
 launch_label="${AGENT_PULSE_LAUNCH_LABEL:-com.agentpulse.helper.55110.beta-edge}"
 watchdog_label="${AGENT_PULSE_ROUTE_WATCHDOG_LABEL:-com.agentpulse.route-watchdog.beta-edge}"
 watchdog_interval_seconds="${AGENT_PULSE_ROUTE_WATCHDOG_INTERVAL_SECONDS:-60}"
+watchdog_probe_url="${AGENT_PULSE_ROUTE_WATCHDOG_PROBE_URL:-$local_shared_url}"
 launch_agent_dir="$HOME/Library/LaunchAgents"
 log_dir="$HOME/Library/Logs"
 plist_path="$launch_agent_dir/$launch_label.plist"
@@ -71,6 +73,23 @@ wait_for_agentpulse_health_url() {
   printf '%s\n' "${AGENT_PULSE_PROBE_ERROR:-unknown probe failure}" >&2
   agentpulse_probe_preview >&2 || true
   return 1
+}
+
+wait_for_public_or_local_shared_agentpulse() {
+  if wait_for_agentpulse_health_url "${public_url%/}/health/get" 10; then
+    agentpulse_require_json_url "${public_url%/}/watch/summary" "200|401"
+    agentpulse_require_tablet_shell "${public_url%/}/"
+    return 0
+  fi
+
+  if [[ "${AGENT_PULSE_PROBE_ERROR:-}" != curl\ failed* ]]; then
+    return 1
+  fi
+
+  log "Public Agent Pulse health is not reachable from macmini3; proving local shared-edge route instead."
+  wait_for_agentpulse_health_url "${local_shared_url%/}/health/get" 60
+  agentpulse_require_json_url "${local_shared_url%/}/watch/summary" "200|401"
+  agentpulse_require_tablet_shell "${local_shared_url%/}/"
 }
 
 assert_project_manager_health() {
@@ -211,6 +230,7 @@ ensure_route_watchdog_launch_agent() {
   mkdir -p "$launch_agent_dir" "$log_dir"
   AGENT_PULSE_REPO_ROOT="$repo_root" \
   AGENT_PULSE_PUBLIC_URL="$public_url" \
+  AGENT_PULSE_ROUTE_WATCHDOG_PROBE_URL="$watchdog_probe_url" \
   AGENT_PULSE_HELPER_URL="http://127.0.0.1:${helper_port}" \
   AGENT_PULSE_EDGE_URL="http://127.0.0.1:${edge_port}" \
   AGENT_PULSE_WATCHDOG_LABEL="$watchdog_label" \
@@ -227,6 +247,7 @@ from pathlib import Path
 plist_path = Path(sys.argv[1])
 repo_root = os.environ["AGENT_PULSE_REPO_ROOT"]
 public_url = os.environ["AGENT_PULSE_PUBLIC_URL"]
+probe_url = os.environ["AGENT_PULSE_ROUTE_WATCHDOG_PROBE_URL"]
 helper_url = os.environ["AGENT_PULSE_HELPER_URL"]
 edge_url = os.environ["AGENT_PULSE_EDGE_URL"]
 label = os.environ["AGENT_PULSE_WATCHDOG_LABEL"]
@@ -239,6 +260,7 @@ command = " ".join([
     "cd", shlex.quote(repo_root), "&&",
     "exec env",
     f"AGENT_PULSE_PUBLIC_URL={shlex.quote(public_url)}",
+    f"AGENT_PULSE_ROUTE_WATCHDOG_PROBE_URL={shlex.quote(probe_url)}",
     f"AGENT_PULSE_HELPER_URL={shlex.quote(helper_url)}",
     f"AGENT_PULSE_EDGE_URL={shlex.quote(edge_url)}",
     f"AGENT_PULSE_ROUTE_WATCHDOG_INTERVAL_SECONDS={shlex.quote(interval_seconds)}",
@@ -331,9 +353,7 @@ agentpulse_require_health_url "http://127.0.0.1:${edge_port}/health/get"
 log "Reconciling shared beta edge route"
 bash scripts/macmini3/reconcile-agentpulse-shared-edge.sh
 
-wait_for_agentpulse_health_url "${public_url%/}/health/get" 60
-agentpulse_require_json_url "${public_url%/}/watch/summary" "200|401"
-agentpulse_require_tablet_shell "${public_url%/}/"
+wait_for_public_or_local_shared_agentpulse
 assert_project_manager_health
 
 log "Installing Agent Pulse public-route watchdog $watchdog_label"

@@ -7,6 +7,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/scripts/macmini3/lib-agentpulse-beta-probe.sh"
 
 public_url="${AGENT_PULSE_PUBLIC_URL:-https://beta.dope-ai.kr/agent-pulse}"
+probe_url="${AGENT_PULSE_ROUTE_WATCHDOG_PROBE_URL:-$public_url}"
 helper_url="${AGENT_PULSE_HELPER_URL:-http://127.0.0.1:55110}"
 edge_url="${AGENT_PULSE_EDGE_URL:-http://127.0.0.1:4355}"
 interval_seconds="${AGENT_PULSE_ROUTE_WATCHDOG_INTERVAL_SECONDS:-60}"
@@ -40,9 +41,9 @@ assert_project_manager_health() {
 }
 
 check_public_route() {
-  agentpulse_check_health_url "$public_url/health/get" 1 &&
-    agentpulse_check_json_url "$public_url/watch/summary" "200|401" 1 &&
-    agentpulse_check_tablet_shell "$public_url/" 1
+  agentpulse_check_health_url "$probe_url/health/get" 1 &&
+    agentpulse_check_json_url "$probe_url/watch/summary" "200|401" 1 &&
+    agentpulse_check_tablet_shell "$probe_url/" 1
 }
 
 repair_public_route() {
@@ -59,16 +60,16 @@ repair_public_route() {
   log "Reconciling marked Agent Pulse shared-edge block."
   bash "$repo_root/scripts/macmini3/reconcile-agentpulse-shared-edge.sh"
 
-  agentpulse_require_health_url "$public_url/health/get"
-  agentpulse_require_json_url "$public_url/watch/summary" "200|401"
-  agentpulse_require_tablet_shell "$public_url/"
+  agentpulse_require_health_url "$probe_url/health/get"
+  agentpulse_require_json_url "$probe_url/watch/summary" "200|401"
+  agentpulse_require_tablet_shell "$probe_url/"
   assert_project_manager_health
   log "Route repair verified."
 }
 
 run_once() {
   if check_public_route; then
-    log "Route healthy at $public_url"
+    log "Route healthy at $probe_url"
     return 0
   fi
   repair_public_route
