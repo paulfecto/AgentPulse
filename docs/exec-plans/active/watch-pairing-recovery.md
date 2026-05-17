@@ -79,10 +79,18 @@ JSON.
 - 2026-05-17: Docker `pnpm test`, `pnpm typecheck`, and `pnpm build` passed in
   an ephemeral container copy with the host repo mounted read-only. Test result:
   41 files / 556 tests passed.
-- 2026-05-17: Physical Watch bootstrap/install retry is blocked by Apple
-  CoreDevice transport, not AgentPulse API: `devicectl` sees Paul’s Apple Watch
-  as paired with Developer Mode enabled, but the tunnel remains `connecting` and
-  install/launch fail with `CoreDeviceError 4000` / tunnel timeout.
+- 2026-05-17: Initial physical Watch bootstrap/install retry was blocked by
+  Apple CoreDevice transport (`CoreDeviceError 4000` / tunnel timeout). A later
+  `devicectl device info details` showed Paul’s Apple Watch paired, Developer
+  Mode enabled, and tunnel state `connected`.
+- 2026-05-17: Retried physical Watch launch with forced bootstrap values for
+  `https://beta.dope-ai.kr/agent-pulse`; `devicectl` launched
+  `com.paulfecto.AgentPulse.watchkitapp` successfully. Helper keychain record
+  for the Watch device is present, not revoked, has fresh `lastSeenAt`, and has
+  a sandbox Watch push token for `com.paulfecto.AgentPulse.watchkitapp`.
+- 2026-05-17: Public transcript proof for a real Codex-visible thread returned
+  `application/json`, 90 visible messages, `sendState: "Ready"`, and no raw
+  provider payload marker. Public Watch attention endpoint returned valid JSON.
 
 ## Changes
 
@@ -116,10 +124,15 @@ JSON.
   summary for `https://beta.dope-ai.kr/agent-pulse`.
 - Passed: public route stress loop, 30 iterations, no Project Manager HTML in
   AgentPulse APIs.
-- Blocked: physical Watch install/bootstrap through Xcode CoreDevice. The Watch
-  is paired and Developer Mode is enabled, but Apple’s local-network device
-  tunnel disconnects before install/launch.
+- Passed: physical Watch launch with forced public beta bootstrap.
+- Passed: helper-side Watch device record recognized the refreshed session and
+  stored a Watch push token.
+- Not exercised: sending a real reply or stop command from the Watch, because
+  that would mutate a real Codex thread. The public authenticated transcript and
+  attention surfaces were verified read-only.
 
 ## Completion State
 
-In progress.
+Server and physical Watch pairing recovery complete. Remaining APNs delivery
+and destructive/action mutations should be verified with an explicit live-test
+thread before claiming production notification coverage.
