@@ -41,7 +41,17 @@ Repair and prove the Agent Pulse public Watch route at
 - `bash -n scripts/macmini3/lib-agentpulse-beta-probe.sh scripts/macmini3/check-agentpulse-beta.sh scripts/macmini3/deploy-agentpulse-beta.sh scripts/macmini3/watch-agentpulse-beta-route.sh scripts/ci/run_agentpulse_beta_deploy.sh` passed.
 - `git diff --check` passed for the route repair scripts and Watch client hunk.
 - Local route-watchdog dry run against the broken public route detected the exact drift: Agent Pulse health returned HTML/Project Manager shell.
-- Docker product gate was attempted locally and blocked because Docker Desktop was not running: `Cannot connect to the Docker daemon at unix:///Users/paulfecto/.docker/run/docker.sock`.
+- Docker product gate was initially blocked because Docker Desktop was not
+  running, then Docker Desktop was started and Docker validation completed.
+- First Docker test run found one real contract-test regression in
+  `apps/helper/src/server/macmini-deploy-script.test.ts`: it still expected
+  the old fallback function name. The test was updated to assert the new local
+  TLS vhost fallback and watchdog probe resolve behavior.
+- Docker tests passed after the contract update:
+  `docker run --rm -v "$PWD":/work -v /work/node_modules -w /work node:22-bookworm bash -lc 'corepack enable && corepack prepare pnpm@10.28.2 --activate && pnpm install --frozen-lockfile && pnpm test -- apps/helper/src/server/macmini-deploy-script.test.ts'`;
+  result: 41 test files passed, 553 tests passed.
+- Docker typecheck/build passed:
+  `docker run --rm -v "$PWD":/work -v /work/node_modules -w /work node:22-bookworm bash -lc 'corepack enable && corepack prepare pnpm@10.28.2 --activate && pnpm install --frozen-lockfile && pnpm typecheck && pnpm build'`.
 - Watch simulator build passed:
   `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project apps/watchos/AgentPulseWatch/AgentPulseWatch.xcodeproj -scheme AgentPulseWatch -configuration Debug -destination 'generic/platform=watchOS Simulator' build CODE_SIGNING_ALLOWED=NO`.
 - First macmini3 deploy at `34f15dc` restored the public route but failed because macmini3 cannot connect to public `beta.dope-ai.kr:443` from itself.
