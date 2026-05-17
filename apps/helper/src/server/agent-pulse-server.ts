@@ -2860,7 +2860,7 @@ function createApp(
         return context.json(
           OlderThreadMessagesResponseSchema.parse({
             threadId,
-            messages: visibleTranscript.messages,
+            messages: limitTranscriptMessagesStrict(visibleTranscript, limit).messages,
             hasMore: sliceStart > 0
           })
         );
@@ -2888,7 +2888,7 @@ function createApp(
         return context.json(
           OlderThreadMessagesResponseSchema.parse({
             threadId,
-            messages: visibleTranscript.messages,
+            messages: limitTranscriptMessagesStrict(visibleTranscript, limit).messages,
             hasMore: sliceStart > 0
           })
         );
@@ -2955,7 +2955,7 @@ function createApp(
       return context.json(
         OlderThreadMessagesResponseSchema.parse({
           threadId,
-          messages: exposed.messages,
+          messages: limitTranscriptMessagesStrict(exposed, limit).messages,
           hasMore: sliceStart > 0
         })
       );

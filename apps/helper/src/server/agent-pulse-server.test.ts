@@ -3946,6 +3946,23 @@ describe('Agent Pulse helper API', () => {
       ]);
       expect(appServer.readFullTranscript).toHaveBeenCalledWith('thread-1');
       expect(appServer.readTranscript).not.toHaveBeenCalled();
+
+      const olderResponse = await fetch(`${server.url}/threads/thread-1/transcript/older?before=message-13&limit=8`, {
+        headers: authHeaders(token, deviceId)
+      });
+      expect(olderResponse.status).toBe(200);
+      const olderBody = await olderResponse.json();
+      expect(olderBody.messages).toHaveLength(8);
+      expect(olderBody.messages.map((message: { id: string }) => message.id)).toEqual([
+        'message-5',
+        'message-6',
+        'message-7',
+        'message-8',
+        'message-9',
+        'message-10',
+        'message-11',
+        'message-12'
+      ]);
     } finally {
       await server.stop();
     }

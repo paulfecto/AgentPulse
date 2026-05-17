@@ -43,6 +43,21 @@ full-history helper read that prevents empty transcript windows.
   same 8-message lightweight transcript window for Watch clients.
 - 2026-05-17: Added helper contract tests for strict Watch tail-window
   transcript reads and Watch send-response transcript capping.
+- 2026-05-17: Older-message pagination responses are also strictly capped after
+  helper transcript transformation, so each Watch scroll-back page remains
+  bounded to the requested page size.
+- 2026-05-17: Deployed commit `bbc38a9e993c3086718c31fba41da69fd1226c64`
+  to macmini3 through the direct SSH deploy path. The route initially reached
+  the updated edge, but the helper behind the reverse tunnel was still the old
+  local process; after restarting only the Agent Pulse helper LaunchAgent
+  `com.agentpulse.helper.55110.beta-edge`, public `/watch/summary` briefly
+  drifted to Project Manager HTML and was repaired by re-running the Agent
+  Pulse shared-edge reconciler.
+- 2026-05-17: Public authenticated proof against
+  `https://beta.dope-ai.kr/agent-pulse` returned Watch session `Apple Watch`,
+  32 summary threads, selected thread `CoWorkOS`, `transcriptMessages = 8`,
+  `visibleMessages = 8`, public URL
+  `https://beta.dope-ai.kr/agent-pulse`, and `openOnMac = false`.
 
 ## Validation Log
 
@@ -53,9 +68,17 @@ full-history helper read that prevents empty transcript windows.
   `docker run --rm -v "$PWD":/work -v /work/node_modules -w /work node:22-bookworm bash -lc 'corepack enable && corepack prepare pnpm@10.28.2 --activate && pnpm install --frozen-lockfile >/dev/null && pnpm test && pnpm typecheck && pnpm build'`
   passed. `pnpm test` reported 41 files and 559 tests passed; `pnpm
   typecheck` completed; `pnpm build` completed helper/tablet builds.
+- PASS: Docker full product gates rerun after older-message capping:
+  `pnpm test`, `pnpm typecheck`, and `pnpm build` passed inside
+  `node:22-bookworm`; `pnpm test` again reported 41 files and 559 tests
+  passed.
 - PASS: Watch simulator build:
   `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project apps/watchos/AgentPulseWatch/AgentPulseWatch.xcodeproj -scheme AgentPulseWatch -configuration Debug -destination 'generic/platform=watchOS Simulator' CODE_SIGNING_ALLOWED=NO build`
   completed with `** BUILD SUCCEEDED **`.
+- PASS: Public route health after repair:
+  `https://beta.dope-ai.kr/agent-pulse/health/get` returned
+  `content-type: application/json`, `status = ok`, and
+  `codexAppServer = connected`.
 - BLOCKED (pre-existing harness adapter state): `python3
   ../agentOS/scripts/harness/verify_harness.py --repo "$PWD"` and
   `verify_protocol.py` both failed before product checks because the resolved
