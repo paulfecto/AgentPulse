@@ -91,6 +91,11 @@ JSON.
 - 2026-05-17: Public transcript proof for a real Codex-visible thread returned
   `application/json`, 90 visible messages, `sendState: "Ready"`, and no raw
   provider payload marker. Public Watch attention endpoint returned valid JSON.
+- 2026-05-17: Live public Watch send proof used a dedicated temporary Codex chat
+  created through AgentPulse, sent a Watch-shaped message through
+  `POST /threads/:threadId/messages`, observed final assistant text
+  `AGENT_PULSE_WATCH_OK`, then deleted the temporary thread. Follow-up Watch
+  summary no longer contained the test thread.
 
 ## Changes
 
@@ -127,9 +132,11 @@ JSON.
 - Passed: physical Watch launch with forced public beta bootstrap.
 - Passed: helper-side Watch device record recognized the refreshed session and
   stored a Watch push token.
-- Not exercised: sending a real reply or stop command from the Watch, because
-  that would mutate a real Codex thread. The public authenticated transcript and
-  attention surfaces were verified read-only.
+- Passed: public Watch send route created a real Codex turn in an isolated test
+  thread and returned the final assistant outcome; the test thread was deleted.
+- Not exercised: stop on a live long-running Codex turn, to avoid creating a
+  deliberately wasteful live run. Stop route coverage remains in automated
+  tests.
 
 ## Completion State
 
