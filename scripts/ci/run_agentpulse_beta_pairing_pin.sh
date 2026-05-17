@@ -121,10 +121,10 @@ PY
     return 1
   fi
 
-  token="$(printf '%s' "$login_json" | python3 - <<'PY'
+  token="$(LOGIN_JSON="$login_json" python3 - <<'PY'
 import json
-import sys
-print(json.load(sys.stdin)["token"])
+import os
+print(json.loads(os.environ["LOGIN_JSON"])["token"])
 PY
 )"
   pin_json="$(curl --connect-timeout 3 --max-time 10 -fsSL \
@@ -133,12 +133,11 @@ PY
     -X POST "$helper_url/settings/pairing-pin" \
     --data '{"deviceName":"Apple Watch"}')"
 
-  printf '%s' "$pin_json" | PUBLIC_URL="$public_url" python3 - <<'PY'
+  PIN_JSON="$pin_json" PUBLIC_URL="$public_url" python3 - <<'PY'
 import json
 import os
-import sys
 
-payload = json.load(sys.stdin)
+payload = json.loads(os.environ["PIN_JSON"])
 print(f"PAIRING_URL={os.environ['PUBLIC_URL'].rstrip('/')}")
 print(f"PAIRING_PIN={payload['pin']}")
 print(f"PAIRING_EXPIRES_AT={payload['expiresAt']}")
