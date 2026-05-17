@@ -55,14 +55,14 @@ final class AgentPulseClient {
         return try decoder.decode(ThreadCreateResponse.self, from: data)
     }
 
-    func transcript(threadId: String, limit: Int = 40) async throws -> ThreadTranscript {
+    func transcript(threadId: String, limit: Int = 8) async throws -> ThreadTranscript {
         guard let encoded = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw AgentPulseWatchError.server("Invalid thread id.")
         }
-        return try await get("/threads/\(encoded)/transcript?limit=\(limit)&history=full", as: ThreadTranscript.self)
+        return try await get("/threads/\(encoded)/transcript?limit=\(limit)&history=full&window=tail", as: ThreadTranscript.self)
     }
 
-    func olderMessages(threadId: String, before messageId: String, limit: Int = 40) async throws -> OlderThreadMessagesResponse {
+    func olderMessages(threadId: String, before messageId: String, limit: Int = 8) async throws -> OlderThreadMessagesResponse {
         guard let encodedThreadId = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let encodedMessageId = messageId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             throw AgentPulseWatchError.server("Invalid thread or message id.")

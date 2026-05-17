@@ -21,7 +21,7 @@ final class AgentPulseStore: ObservableObject {
     @Published var hasOlderMessages = false
     @Published var errorMessage: String?
 
-    private let transcriptPageLimit = 40
+    private let transcriptPageLimit = 8
     private let runFollowMaxAttempts = 120
     private let runFollowIntervalNanoseconds: UInt64 = 2_000_000_000
     private let keychain = KeychainStore()

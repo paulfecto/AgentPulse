@@ -9,6 +9,7 @@ import type {
   Project,
   RemoteAccessSettings,
   Thread,
+  ThreadMessageResponse,
   ThreadTranscript,
   WatchNotificationsSettings
 } from '@agent-pulse/shared';
@@ -3872,6 +3873,154 @@ describe('Agent Pulse helper API', () => {
       });
       expect(appServer.readFullTranscript).toHaveBeenCalledWith('thread-1');
       expect(appServer.readTranscript).not.toHaveBeenCalled();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('can return a strict tail window from full history for Watch detail', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const fullTranscript: ThreadTranscript = {
+      threadId: 'thread-1',
+      activeTurnId: null,
+      sendState: {
+        canSend: true,
+        reason: 'ready',
+        label: 'Ready'
+      },
+      messages: Array.from({ length: 20 }, (_, index) => ({
+        id: `message-${index + 1}`,
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        kind: 'message',
+        text: `Visible message ${index + 1}`,
+        createdAt: `2026-04-25T16:${String(index).padStart(2, '0')}:00Z`
+      }))
+    };
+    const appServer = {
+      isConnected: () => true,
+      readTranscript: vi.fn(async () => ({ ...fullTranscript, messages: [] })),
+      readFullTranscript: vi.fn(async () => fullTranscript),
+      sendMessage: vi.fn()
+    };
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: true,
+      remoteAccess: remoteAccessSettings()
+    };
+    const settingsStore = {
+      save: vi.fn(),
+      load: vi.fn()
+    } as unknown as HelperSettingsStore;
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: { listThreads: async () => [] },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      appServer,
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      const response = await fetch(`${server.url}/threads/thread-1/transcript?limit=8&history=full&window=tail`, {
+        headers: authHeaders(token, deviceId)
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as ThreadTranscript;
+      expect(body.messages).toHaveLength(8);
+      expect(body.messages.map((message) => message.id)).toEqual([
+        'message-13',
+        'message-14',
+        'message-15',
+        'message-16',
+        'message-17',
+        'message-18',
+        'message-19',
+        'message-20'
+      ]);
+      expect(appServer.readFullTranscript).toHaveBeenCalledWith('thread-1');
+      expect(appServer.readTranscript).not.toHaveBeenCalled();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('caps Watch send responses to the lightweight transcript window', async () => {
+    const registry = new DeviceRegistry(new MemoryDeviceStore());
+    const pairing = new PairingManager(registry);
+    const fullTranscript: ThreadTranscript = {
+      threadId: 'thread-1',
+      activeTurnId: 'turn-1',
+      sendState: {
+        canSend: true,
+        reason: 'ready',
+        label: 'Ready'
+      },
+      messages: Array.from({ length: 12 }, (_, index) => ({
+        id: `message-${index + 1}`,
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        kind: 'message',
+        text: `Visible message ${index + 1}`,
+        createdAt: `2026-04-25T16:${String(index).padStart(2, '0')}:00Z`
+      }))
+    };
+    const appServer = {
+      ensureConnected: vi.fn(async () => undefined),
+      isConnected: () => true,
+      readTranscript: vi.fn(async () => fullTranscript),
+      sendMessage: vi.fn(async () => ({
+        ok: true as const,
+        mode: 'start' as const,
+        turnId: 'turn-1',
+        transcript: fullTranscript
+      }))
+    };
+    const settings = {
+      port: await pickFreeHighPort(),
+      lanEnabled: false,
+      mobileSendEnabled: true,
+      remoteAccess: remoteAccessSettings()
+    };
+    const settingsStore = {
+      save: vi.fn(),
+      load: vi.fn()
+    } as unknown as HelperSettingsStore;
+    const server = await startAgentPulseServer({
+      settings,
+      settingsStore,
+      registry,
+      pairing,
+      adminAuth: createAdminAuth(),
+      threadProvider: { listThreads: async () => [] },
+      opener: createThreadOpener({ execFile: vi.fn((_command, _args, callback) => callback(null)) }),
+      desktopControlDisabled: true,
+      appServer,
+      version: '0.1.0'
+    });
+
+    try {
+      const { token, deviceId } = await pairForTest(server.url, pairing);
+      const response = await fetch(`${server.url}/threads/thread-1/messages`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders(token, deviceId),
+          'content-type': 'application/json',
+          'x-agent-pulse-client': 'watch'
+        },
+        body: JSON.stringify({ text: 'Short Watch reply' })
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as ThreadMessageResponse;
+      expect(body.transcript.messages).toHaveLength(8);
+      expect(body.transcript.messages[0]?.id).toBe('message-5');
+      expect(body.transcript.messages.at(-1)?.id).toBe('message-12');
     } finally {
       await server.stop();
     }

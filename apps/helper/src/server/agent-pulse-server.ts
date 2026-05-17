@@ -173,6 +173,7 @@ const MAX_OUTGOING_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_OUTGOING_ATTACHMENT_TOTAL_BYTES = 16 * 1024 * 1024;
 const MAX_VOICE_TRANSCRIPTION_BYTES = 24_000_000;
 const WATCH_MESSAGE_MAX_CHARS = 500;
+const WATCH_TRANSCRIPT_PAGE_MESSAGES = 8;
 const CHATGPT_TRANSCRIPTIONS_URL = 'https://chatgpt.com/backend-api/transcribe';
 const OPENAI_TRANSCRIPTIONS_URL = 'https://api.openai.com/v1/audio/transcriptions';
 const DEFAULT_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
@@ -2696,6 +2697,7 @@ function createApp(
     const messageLimit = parseTranscriptMessageLimit(context.req.query('limit'));
     const transcriptView = parseTranscriptView(context.req.query('view'));
     const transcriptHistory = parseTranscriptHistory(context.req.query('history'));
+    const transcriptWindow = parseTranscriptWindow(context.req.query('window'));
     if (!isProviderEnabled(providerForThreadId(threadId))) {
       return disabledProviderResponse(context, providerForThreadId(threadId));
     }
@@ -2706,11 +2708,14 @@ function createApp(
       }
       try {
         const transcript = await options.claudeCode.readTranscript(threadId);
+        const transformedTranscript = transformTranscript(
+          transcriptWindow === 'tail' ? transcript : limitTranscriptMessages(transcript, messageLimit),
+          threadId
+        );
         const visibleTranscript = presentTranscriptForView(
-          transformTranscript(
-            limitTranscriptMessages(transcript, messageLimit),
-            threadId
-          ),
+          transcriptWindow === 'tail'
+            ? limitTranscriptMessagesStrict(transformedTranscript, messageLimit ?? WATCH_TRANSCRIPT_PAGE_MESSAGES)
+            : transformedTranscript,
           transcriptView,
           messageLimit
         );
@@ -2728,11 +2733,14 @@ function createApp(
       }
       try {
         const transcript = await options.copilot.readTranscript(threadId);
+        const transformedTranscript = transformTranscript(
+          transcriptWindow === 'tail' ? transcript : limitTranscriptMessages(transcript, messageLimit),
+          threadId
+        );
         const visibleTranscript = presentTranscriptForView(
-          transformTranscript(
-            limitTranscriptMessages(transcript, messageLimit),
-            threadId
-          ),
+          transcriptWindow === 'tail'
+            ? limitTranscriptMessagesStrict(transformedTranscript, messageLimit ?? WATCH_TRANSCRIPT_PAGE_MESSAGES)
+            : transformedTranscript,
           transcriptView,
           messageLimit
         );
@@ -2779,11 +2787,14 @@ function createApp(
         ? await options.usageProvider(threadId).catch(() => undefined)
         : undefined;
       hub.broadcast({ type: 'health/changed', payload: healthPayload(options, startedAt) });
+      const transformedTranscript = transformTranscript(
+        transcriptWindow === 'tail' ? transcript : limitTranscriptMessages(transcript, messageLimit),
+        threadId
+      );
       const visibleTranscript = presentTranscriptForView(
-        transformTranscript(
-          limitTranscriptMessages(transcript, messageLimit),
-          threadId
-        ),
+        transcriptWindow === 'tail'
+          ? limitTranscriptMessagesStrict(transformedTranscript, messageLimit ?? WATCH_TRANSCRIPT_PAGE_MESSAGES)
+          : transformedTranscript,
         transcriptView,
         messageLimit
       );
@@ -3111,10 +3122,8 @@ function createApp(
     }
 
     const parsed = ThreadMessageRequestSchema.parse(await context.req.json());
-    if (
-      context.req.header('x-agent-pulse-client') === 'watch' &&
-      (parsed.text?.length ?? 0) > WATCH_MESSAGE_MAX_CHARS
-    ) {
+    const isWatchClient = context.req.header('x-agent-pulse-client') === 'watch';
+    if (isWatchClient && (parsed.text?.length ?? 0) > WATCH_MESSAGE_MAX_CHARS) {
       return context.json({ error: `Watch messages must be ${WATCH_MESSAGE_MAX_CHARS} characters or fewer.` }, 400);
     }
     const threadId = context.req.param('threadId');
@@ -3159,7 +3168,9 @@ function createApp(
         );
         const parsedResponse = ThreadMessageResponseSchema.parse({
           ...result,
-          transcript: visibleTranscript
+          transcript: isWatchClient
+            ? limitTranscriptMessagesStrict(visibleTranscript, WATCH_TRANSCRIPT_PAGE_MESSAGES)
+            : visibleTranscript
         });
         transcriptCache.set(threadId, parsedResponse.transcript);
         hub.broadcast({ type: 'thread/transcript/changed', payload: parsedResponse.transcript });
@@ -3189,7 +3200,9 @@ function createApp(
         );
         const parsedResponse = ThreadMessageResponseSchema.parse({
           ...result,
-          transcript: visibleTranscript
+          transcript: isWatchClient
+            ? limitTranscriptMessagesStrict(visibleTranscript, WATCH_TRANSCRIPT_PAGE_MESSAGES)
+            : visibleTranscript
         });
         transcriptCache.set(threadId, parsedResponse.transcript);
         hub.broadcast({ type: 'thread/transcript/changed', payload: parsedResponse.transcript });
@@ -3323,7 +3336,9 @@ function createApp(
       );
       const response = {
         ...result,
-        transcript: visibleTranscript
+        transcript: isWatchClient
+          ? limitTranscriptMessagesStrict(visibleTranscript, WATCH_TRANSCRIPT_PAGE_MESSAGES)
+          : visibleTranscript
       };
       const parsedResponse = ThreadMessageResponseSchema.parse(response);
       transcriptCache.set(threadId, parsedResponse.transcript);
@@ -4850,6 +4865,26 @@ type TranscriptHistory = 'recent' | 'full';
 
 function parseTranscriptHistory(raw: string | undefined): TranscriptHistory {
   return raw === 'full' ? 'full' : 'recent';
+}
+
+type TranscriptWindow = 'anchored' | 'tail';
+
+function parseTranscriptWindow(raw: string | undefined): TranscriptWindow {
+  return raw === 'tail' ? 'tail' : 'anchored';
+}
+
+function limitTranscriptMessagesStrict(
+  transcript: ThreadTranscript,
+  limit: number | undefined
+): ThreadTranscript {
+  if (!limit || transcript.messages.length <= limit) {
+    return transcript;
+  }
+
+  return ThreadTranscriptSchema.parse({
+    ...transcript,
+    messages: transcript.messages.slice(-limit)
+  });
 }
 
 function presentTranscriptForView(
