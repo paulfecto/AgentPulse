@@ -7,12 +7,23 @@ AGENT_PULSE_PROBE_ERROR=""
 agentpulse_probe_url() {
   local url="$1"
   local output status body
+  local curl_args=(--connect-timeout 5 --max-time 20 -sS -w $'\n%{http_code}')
 
   AGENT_PULSE_PROBE_STATUS=""
   AGENT_PULSE_PROBE_BODY=""
   AGENT_PULSE_PROBE_ERROR=""
 
-  if ! output="$(curl --connect-timeout 5 --max-time 20 -sS -w $'\n%{http_code}' "$url" 2>&1)"; then
+  if [[ "${AGENT_PULSE_PROBE_FOLLOW_REDIRECTS:-0}" == "1" ]]; then
+    curl_args+=(-L)
+  fi
+  if [[ "${AGENT_PULSE_PROBE_INSECURE:-0}" == "1" ]]; then
+    curl_args+=(-k)
+  fi
+  if [[ -n "${AGENT_PULSE_PROBE_RESOLVE:-}" ]]; then
+    curl_args+=(--resolve "$AGENT_PULSE_PROBE_RESOLVE")
+  fi
+
+  if ! output="$(curl "${curl_args[@]}" "$url" 2>&1)"; then
     AGENT_PULSE_PROBE_ERROR="curl failed for $url: $output"
     return 1
   fi
