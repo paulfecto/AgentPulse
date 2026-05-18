@@ -82,7 +82,24 @@ Stop `https://beta.dope-ai.kr/agent-pulse` from returning Project Manager HTML t
 - PASS: Docker full product gate:
   `pnpm test`, `pnpm typecheck`, and `pnpm build` passed inside
   `node:22-bookworm`; tests reported 41 files and 559 tests passed.
+- PASS: Deployed commit `e240214` directly to macmini3 over SSH; deploy built
+  helper/tablet, recreated only `agentpulse-beta-edge`, reconciled the shared
+  edge after `nginx -t`, installed the patched
+  `com.agentpulse.route-watchdog.beta-edge` LaunchAgent, and reported Agent
+  Pulse healthy at `https://beta.dope-ai.kr/agent-pulse`.
+- PASS: Patched route watchdog one-shot on macmini3:
+  `AGENT_PULSE_ROUTE_WATCHDOG_ONCE=1 ... bash
+  scripts/macmini3/watch-agentpulse-beta-route.sh` reported `Route healthy at
+  https://beta.dope-ai.kr/agent-pulse`.
+- PASS: Bounded TestFlight-facing stress probe: 20 loops through macmini3 TLS
+  resolve checked `/health/get`, authenticated `/watch/summary`, and
+  authenticated `transcript?limit=8&history=full&window=tail`; every response
+  stayed JSON, never Project Manager HTML, and transcript size stayed within
+  the 8-message Watch limit. Selected thread title was `office administrator`.
+- PASS: `gh run list --repo paulfecto/AgentPulse --limit 5` showed only older
+  `workflow_dispatch` runs from 2026-05-17; this repair did not use a GitHub
+  Actions deployment.
 
 ## Completion State
 
-- status: in_progress
+- status: complete
