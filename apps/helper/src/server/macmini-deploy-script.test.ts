@@ -61,6 +61,8 @@ describe('macmini3 Agent Pulse beta deploy automation', () => {
   it('documents the non-destructive Project Manager preservation contract', async () => {
     const docs = await readRepoFile('docs/deploy/macmini3-agent-pulse-beta.md');
     const deploy = await readRepoFile('scripts/macmini3/deploy-agentpulse-beta.sh');
+    const watchdog = await readRepoFile('scripts/macmini3/watch-agentpulse-beta-route.sh');
+    const tunnel = await readRepoFile('scripts/macmini3/install-local-reverse-tunnel.sh');
 
     expect(docs).toContain('preserves existing `/project-manager`, `/health`, `/api`, MCP');
     expect(docs).toContain('restores the previous shared-edge config if');
@@ -74,5 +76,12 @@ describe('macmini3 Agent Pulse beta deploy automation', () => {
     expect(deploy).toContain('AGENT_PULSE_ROUTE_WATCHDOG_PROBE_RESOLVE');
     expect(deploy).toContain('Public Agent Pulse health is not reachable from macmini3');
     expect(deploy).toContain('bash scripts/macmini3/reconcile-agentpulse-shared-edge.sh');
+    expect(watchdog).toContain('health_resolve="${AGENT_PULSE_ROUTE_WATCHDOG_HEALTH_RESOLVE:-$probe_resolve}"');
+    expect(watchdog).toContain('curl_args+=(--resolve "$health_resolve")');
+    expect(watchdog).toContain('Helper relay is not healthy before repair');
+    expect(watchdog).toContain('Agent Pulse edge is not healthy before repair');
+    expect(tunnel).toContain('remote_host="${AGENT_PULSE_TUNNEL_HOST:-macmini-3}"');
+    expect(tunnel).toContain('remote_port="${AGENT_PULSE_TUNNEL_REMOTE_PORT:-55112}"');
+    expect(tunnel).toContain('local_port="${AGENT_PULSE_TUNNEL_LOCAL_PORT:-55110}"');
   });
 });

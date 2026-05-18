@@ -9,6 +9,7 @@ source "$repo_root/scripts/macmini3/lib-agentpulse-beta-probe.sh"
 public_url="${AGENT_PULSE_PUBLIC_URL:-https://beta.dope-ai.kr/agent-pulse}"
 probe_url="${AGENT_PULSE_ROUTE_WATCHDOG_PROBE_URL:-$public_url}"
 probe_resolve="${AGENT_PULSE_ROUTE_WATCHDOG_PROBE_RESOLVE:-}"
+health_resolve="${AGENT_PULSE_ROUTE_WATCHDOG_HEALTH_RESOLVE:-$probe_resolve}"
 helper_url="${AGENT_PULSE_HELPER_URL:-http://127.0.0.1:55112}"
 edge_url="${AGENT_PULSE_EDGE_URL:-http://127.0.0.1:4355}"
 interval_seconds="${AGENT_PULSE_ROUTE_WATCHDOG_INTERVAL_SECONDS:-60}"
@@ -21,7 +22,11 @@ log() {
 
 request_body() {
   local url="$1"
-  curl --connect-timeout 5 --max-time 20 -fsSL "$url"
+  local curl_args=(--connect-timeout 5 --max-time 20 -fsSL)
+  if [[ -n "$health_resolve" ]]; then
+    curl_args+=(--resolve "$health_resolve")
+  fi
+  curl "${curl_args[@]}" "$url"
 }
 
 assert_project_manager_health() {
@@ -50,8 +55,12 @@ check_public_route() {
 repair_public_route() {
   log "Route drift detected: ${AGENT_PULSE_PROBE_ERROR:-unknown probe failure}"
   assert_project_manager_health
-  agentpulse_require_health_url "$helper_url/health/get"
-  agentpulse_require_health_url "$edge_url/health/get"
+  if ! agentpulse_check_health_url "$helper_url/health/get" 1; then
+    log "Helper relay is not healthy before repair: ${AGENT_PULSE_PROBE_ERROR:-unknown helper failure}"
+  fi
+  if ! agentpulse_check_health_url "$edge_url/health/get" 1; then
+    log "Agent Pulse edge is not healthy before repair: ${AGENT_PULSE_PROBE_ERROR:-unknown edge failure}"
+  fi
 
   if [[ "$dry_run" == "1" ]]; then
     log "Dry run enabled; not reconciling shared beta edge."
