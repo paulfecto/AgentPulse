@@ -150,6 +150,9 @@ Stop `https://beta.dope-ai.kr/agent-pulse` from returning Project Manager HTML t
   the local helper instead of resetting.
 - Public `/agent-pulse/health/get` and Watch APIs return Agent Pulse JSON,
   never Project Manager HTML or nginx HTML.
+- Docker edge and shared edge convert Agent Pulse upstream `5xx` failures to a
+  small JSON error payload, so even transient helper/relay failures do not
+  surface as a web page to TestFlight.
 - SIGTERM on the helper exits within a bounded time, so LaunchAgent can restart
   it instead of leaving a stale listener that accepts TCP but never answers
   health checks.
@@ -219,7 +222,25 @@ Stop `https://beta.dope-ai.kr/agent-pulse` from returning Project Manager HTML t
 - PASS: final Docker product gate in `node:22-bookworm`:
   `pnpm test`, `pnpm typecheck`, and `pnpm build`; 41 test files and 560 tests
   passed.
+- PASS: pushed commit `219d884420b1ae0291ee979432fecb7667fc0408` to
+  `origin/main`.
+- PASS: macmini3 checkout fast-forwarded to
+  `219d884420b1ae0291ee979432fecb7667fc0408` without a hard reset.
+- PASS: direct macmini3 deploy of `219d884420b1ae0291ee979432fecb7667fc0408`
+  built the tablet/helper, recreated only `agentpulse-beta-edge`, reconciled
+  the marked `/agent-pulse` shared-edge block after `nginx -t`, reinstalled
+  `com.agentpulse.route-watchdog.beta-edge`, and reported Agent Pulse beta
+  healthy.
+- PASS: post-deploy public checks:
+  `/agent-pulse/health/get` returned JSON with `codexAppServer: connected`,
+  `/agent-pulse/` served the Agent Pulse tablet shell, and
+  `/project-manager/health` stayed `healthy`.
+- PASS: post-deploy Watch-auth stress:
+  15 loops over public `/health/get`, unauthenticated `/watch/summary`
+  expecting JSON `401`, authenticated `/watch/summary`, and authenticated
+  Agent Pulse thread transcript. Every API response stayed JSON, transcript
+  messages stayed capped at 8, and no nginx/Project Manager HTML appeared.
 
 ## Completion State
 
-- status: product route fixed and validated; awaiting commit/push
+- status: complete
