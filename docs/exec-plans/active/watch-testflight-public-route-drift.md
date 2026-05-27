@@ -100,6 +100,126 @@ Stop `https://beta.dope-ai.kr/agent-pulse` from returning Project Manager HTML t
   `workflow_dispatch` runs from 2026-05-17; this repair did not use a GitHub
   Actions deployment.
 
+## 2026-05-27 Regression Reopen
+
+### Current Failure
+
+- Public route regression reproduced at 2026-05-27T01:00Z:
+  `curl https://beta.dope-ai.kr/agent-pulse/health/get` returned HTTP `502`
+  with `content-type: text/html`.
+- `https://beta.dope-ai.kr/agent-pulse/watch/summary` also returned HTTP `502`
+  HTML.
+- Project Manager stayed healthy:
+  `https://beta.dope-ai.kr/project-manager/health` and
+  `https://beta.dope-ai.kr/health` both returned `healthy`.
+- macmini3 had `sshd-session` listening on `127.0.0.1:55112`, but
+  `curl http://127.0.0.1:55112/health/get` failed with
+  `Recv failure: Connection reset by peer`.
+- This Mac had no process listening on `127.0.0.1:55110`, while the reverse
+  tunnel LaunchAgent was still running with
+  `-R 127.0.0.1:55112:127.0.0.1:55110 macmini-3`.
+- Root cause: the shared edge route and tunnel were present, but the desktop
+  Mac helper was not supervised, so the relay reset and the Docker/shared edge
+  returned nginx HTML `502`.
+- Secondary root cause for the Watch `unknown device` state: the live Apple
+  Watch pairing was stored under keychain service `com.agentpulse.helper`, while
+  the beta helper defaulted to an empty `AgentPulseBeta` service.
+
+### Additional Write Set
+
+- `scripts/macmini3/install-local-beta-helper.sh`
+- `apps/helper/src/server/macmini-deploy-script.test.ts`
+- `docs/deploy/macmini3-agent-pulse-beta.md`
+- `docs/exec-plans/active/watch-testflight-public-route-drift.md`
+
+### Additional Acceptance Criteria
+
+- Codex desktop Mac has a tracked local helper LaunchAgent installer.
+- The local helper LaunchAgent starts the helper with:
+  `AGENT_PULSE_DISABLE_CODEX_DESKTOP=1`,
+  `AGENT_PULSE_SKIP_MANAGED_TUNNEL=1`,
+  `AGENT_PULSE_PUBLIC_URL=https://beta.dope-ai.kr/agent-pulse`, and
+  port `55110`.
+- The local helper LaunchAgent uses the existing paired-device keychain service
+  when present, so the TestFlight Watch remains known after restart.
+- The installer proves local helper health before reporting success.
+- The installer stages a HOME-owned runtime before LaunchAgent start, because
+  this Mac rejected LaunchAgent execution from the external `/Volumes/...`
+  checkout with `Operation not permitted`.
+- The existing reverse tunnel can then make macmini3 `127.0.0.1:55112` reach
+  the local helper instead of resetting.
+- Public `/agent-pulse/health/get` and Watch APIs return Agent Pulse JSON,
+  never Project Manager HTML or nginx HTML.
+- SIGTERM on the helper exits within a bounded time, so LaunchAgent can restart
+  it instead of leaving a stale listener that accepts TCP but never answers
+  health checks.
+- The helper LaunchAgent uses `KeepAlive = true`, so a clean signal-triggered
+  helper exit is restarted just like a crash.
+
+### 2026-05-27 Evidence Log
+
+- Reproduced live public failure:
+  `https://beta.dope-ai.kr/agent-pulse/health/get` returned HTTP `502` with
+  `content-type: text/html`; `/watch/summary` also returned HTTP `502` HTML.
+- Confirmed Project Manager was not broken:
+  `https://beta.dope-ai.kr/project-manager/health` and
+  `https://beta.dope-ai.kr/health` returned `healthy`.
+- Isolated failed hop:
+  macmini3 `127.0.0.1:55112` was listening but reset connections; this Mac had
+  no listener on `127.0.0.1:55110`, so macmini3 Docker edge returned nginx
+  `502`.
+- First LaunchAgent install attempt failed from the external checkout with
+  `Operation not permitted`; fixed by staging the built runtime under
+  `~/Library/Application Support/Agent Pulse Beta/runtime`.
+- Existing TestFlight Watch pairing was found under keychain service
+  `com.agentpulse.helper`; installer now auto-selects that service when
+  present and passes `AGENT_PULSE_KEYCHAIN_SERVICE` to the helper.
+- Local helper install passed:
+  `scripts/macmini3/install-local-beta-helper.sh` built and installed
+  `com.agentpulse.helper.55110.beta-edge`, then proved local
+  `/health/get` returned `codexAppServer: connected`.
+- Relay and edge proof passed:
+  macmini3 `http://127.0.0.1:55112/health/get`,
+  `http://127.0.0.1:4355/health/get`, and local shared TLS resolve for
+  `/agent-pulse/health/get` all returned Agent Pulse JSON with
+  `codexAppServer: connected`.
+- Public route proof passed:
+  `https://beta.dope-ai.kr/agent-pulse/health/get` returned Agent Pulse JSON;
+  unauthenticated `/watch/summary` returned JSON `401 {"error":"missing"}`;
+  tablet shell loaded Agent Pulse HTML under `/agent-pulse/`, not Project
+  Manager.
+- Watch-auth proof passed using the existing Apple Watch device keychain
+  record: `/watch/summary` returned HTTP `200`, 32 threads, remote URL
+  `https://beta.dope-ai.kr/agent-pulse`; known Agent Pulse thread transcript
+  returned HTTP `200` JSON capped at 8 messages.
+- Supervisor proof passed after the bounded shutdown patch and `KeepAlive =
+  true`: sending SIGTERM to the helper process produced a new helper pid on
+  attempt 2, and public `/agent-pulse/health/get` returned JSON
+  `codexAppServer: connected` without manual repair.
+- macmini3 route watchdog one-shot passed:
+  `AGENT_PULSE_ROUTE_WATCHDOG_ONCE=1 ... watch-agentpulse-beta-route.sh`
+  reported route healthy; Project Manager health remained healthy.
+- Authenticated public Watch stress passed 20 loops:
+  `/health/get`, authenticated `/watch/summary`, and authenticated
+  `transcript?limit=8&history=full&window=tail` stayed JSON, never returned
+  Project Manager/nginx HTML, and transcript messages stayed at 8.
+
+### 2026-05-27 Validation Log
+
+- PASS: shell syntax:
+  `bash -n scripts/macmini3/install-local-beta-helper.sh
+  scripts/macmini3/install-local-reverse-tunnel.sh
+  scripts/macmini3/watch-agentpulse-beta-route.sh
+  scripts/macmini3/deploy-agentpulse-beta.sh
+  scripts/macmini3/reconcile-agentpulse-shared-edge.sh
+  scripts/macmini3/lib-agentpulse-beta-probe.sh`.
+- PASS: targeted Docker contract test:
+  `pnpm exec vitest run apps/helper/src/server/macmini-deploy-script.test.ts`
+  in `node:22-bookworm`; 4 tests passed.
+- PASS: final Docker product gate in `node:22-bookworm`:
+  `pnpm test`, `pnpm typecheck`, and `pnpm build`; 41 test files and 560 tests
+  passed.
+
 ## Completion State
 
-- status: complete
+- status: product route fixed and validated; awaiting commit/push

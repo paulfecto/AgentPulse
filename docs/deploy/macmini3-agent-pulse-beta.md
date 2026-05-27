@@ -13,6 +13,8 @@ the active Mac relay helper on `127.0.0.1:55112`.
 - Helper relay: macOS SSH relay on `55112`, because the real Codex app-server
   state lives on the Codex desktop Mac, not inside the shared public nginx
   container.
+- Local helper supervisor: a LaunchAgent on the Codex desktop Mac keeps the
+  helper listening on `127.0.0.1:55110`, with Codex Desktop control disabled.
 - Docker edge: nginx container named `agentpulse-beta-edge`.
 - Docker edge static root: `apps/tablet/dist` mounted read-only at
   `/usr/share/nginx/html`.
@@ -75,6 +77,27 @@ Validate:
 ```sh
 scripts/macmini3/check-agentpulse-beta.sh
 ```
+
+## Codex desktop Mac relay
+
+Run these from the Codex desktop Mac checkout when the Watch-facing public route
+must be restored or after rebooting the desktop Mac:
+
+```sh
+scripts/macmini3/install-local-beta-helper.sh
+scripts/macmini3/install-local-reverse-tunnel.sh
+```
+
+The helper installer builds the repo, installs LaunchAgent
+`com.agentpulse.helper.55110.beta-edge`, and proves
+`http://127.0.0.1:55110/health/get` returns Agent Pulse JSON with the real
+Codex app-server connected. It stages the built helper/tablet runtime under
+`~/Library/Application Support/Agent Pulse Beta/runtime` first, because macOS
+LaunchAgents may not be allowed to execute directly from the external
+`/Volumes/...` checkout. It also passes the existing paired-device keychain
+service into the helper when one is found, so the TestFlight Watch does not
+become an unknown device after a helper restart. The tunnel installer then
+exposes that local helper to macmini3 as `127.0.0.1:55112`.
 
 ## Watch pairing
 

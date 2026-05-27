@@ -33,6 +33,7 @@ if (!singleInstanceLock.acquired) {
   );
   process.exit(1);
 }
+const releaseSingleInstanceLock = singleInstanceLock.release;
 
 const settingsStore = new HelperSettingsStore();
 const registry = new DeviceRegistry(createDefaultDeviceStore());
@@ -144,24 +145,41 @@ process.on('unhandledRejection', (reason) => {
   console.error('[helper] unhandledRejection', reason);
 });
 
-process.on('SIGINT', async () => {
-  await server.stop();
-  await remoteSupervisor.stop();
-  await advertiser.stop();
-  opener.dispose();
-  claudeCode.dispose();
-  catalog.dispose();
-  await singleInstanceLock.release();
-  process.exit(0);
+const shutdownTimeoutMs = Number(process.env.AGENT_PULSE_SHUTDOWN_TIMEOUT_MS || '5000');
+let shutdownStarted = false;
+
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shutdownStarted) {
+    return;
+  }
+  shutdownStarted = true;
+
+  const forceExit = setTimeout(() => {
+    console.error(`[helper] forced exit after ${shutdownTimeoutMs}ms during ${signal}`);
+    process.exit(0);
+  }, shutdownTimeoutMs);
+  forceExit.unref();
+
+  try {
+    opener.dispose();
+    claudeCode.dispose();
+    catalog.dispose();
+    await Promise.allSettled([
+      server.stop(),
+      remoteSupervisor.stop(),
+      advertiser.stop(),
+      releaseSingleInstanceLock()
+    ]);
+  } finally {
+    clearTimeout(forceExit);
+    process.exit(0);
+  }
+}
+
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
 });
 
-process.on('SIGTERM', async () => {
-  await server.stop();
-  await remoteSupervisor.stop();
-  await advertiser.stop();
-  opener.dispose();
-  claudeCode.dispose();
-  catalog.dispose();
-  await singleInstanceLock.release();
-  process.exit(0);
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM');
 });

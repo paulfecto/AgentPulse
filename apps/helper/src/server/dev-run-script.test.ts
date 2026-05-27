@@ -38,6 +38,16 @@ describe('dev-run Cloudflare wiring', () => {
     expect(devServer).toContain("process.env.AGENT_PULSE_SKIP_MANAGED_TUNNEL !== '1'");
   });
 
+  it('bounds dev-server shutdown so launchd supervisors can restart it', async () => {
+    const devServer = await readFile(path.join(repoRoot, 'apps/helper/src/dev-server.ts'), 'utf8');
+
+    expect(devServer).toContain('AGENT_PULSE_SHUTDOWN_TIMEOUT_MS');
+    expect(devServer).toContain('[helper] forced exit after');
+    expect(devServer).toContain("process.on('SIGTERM', () =>");
+    expect(devServer).toContain("void shutdown('SIGTERM')");
+    expect(devServer).toContain('Promise.allSettled([');
+  });
+
   it('allows the configured Cloudflare hostname through Vite host checks', async () => {
     const viteConfig = await readFile(path.join(repoRoot, 'apps/tablet/vite.config.ts'), 'utf8');
 

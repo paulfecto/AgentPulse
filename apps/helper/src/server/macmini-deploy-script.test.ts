@@ -62,8 +62,10 @@ describe('macmini3 Agent Pulse beta deploy automation', () => {
     const docs = await readRepoFile('docs/deploy/macmini3-agent-pulse-beta.md');
     const deploy = await readRepoFile('scripts/macmini3/deploy-agentpulse-beta.sh');
     const watchdog = await readRepoFile('scripts/macmini3/watch-agentpulse-beta-route.sh');
+    const helper = await readRepoFile('scripts/macmini3/install-local-beta-helper.sh');
     const tunnel = await readRepoFile('scripts/macmini3/install-local-reverse-tunnel.sh');
 
+    expect(docs).toContain('scripts/macmini3/install-local-beta-helper.sh');
     expect(docs).toContain('preserves existing `/project-manager`, `/health`, `/api`, MCP');
     expect(docs).toContain('restores the previous shared-edge config if');
     expect(docs).toContain('validation fails');
@@ -80,6 +82,20 @@ describe('macmini3 Agent Pulse beta deploy automation', () => {
     expect(watchdog).toContain('curl_args+=(--resolve "$health_resolve")');
     expect(watchdog).toContain('Helper relay is not healthy before repair');
     expect(watchdog).toContain('Agent Pulse edge is not healthy before repair');
+    expect(helper).toContain('com.agentpulse.helper.55110.beta-edge');
+    expect(helper).toContain('Staging LaunchAgent-readable runtime');
+    expect(helper).toContain('apps/helper/dist');
+    expect(helper).toContain('apps/tablet/dist');
+    expect(helper).toContain('npm install --omit=dev --no-audit --no-fund --package-lock=false');
+    expect(helper).toContain('has_device_index_for_service "AgentPulseBeta"');
+    expect(helper).toContain('has_device_index_for_service "com.agentpulse.helper"');
+    expect(helper).toContain('AGENT_PULSE_KEYCHAIN_SERVICE=');
+    expect(helper).toContain('AGENT_PULSE_DISABLE_CODEX_DESKTOP=1');
+    expect(helper).toContain('AGENT_PULSE_SKIP_MANAGED_TUNNEL=1');
+    expect(helper).toContain('AGENT_PULSE_SKIP_BUILD=1');
+    expect(helper).toContain('scripts/macmini3/run-agentpulse-beta-helper.sh');
+    expect(helper).toContain('payload.get("codexAppServer") != "connected"');
+    expect(helper).toContain('"KeepAlive": True');
     expect(tunnel).toContain('remote_host="${AGENT_PULSE_TUNNEL_HOST:-macmini-3}"');
     expect(tunnel).toContain('remote_port="${AGENT_PULSE_TUNNEL_REMOTE_PORT:-55112}"');
     expect(tunnel).toContain('local_port="${AGENT_PULSE_TUNNEL_LOCAL_PORT:-55110}"');
