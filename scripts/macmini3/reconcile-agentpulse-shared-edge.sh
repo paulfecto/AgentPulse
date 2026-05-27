@@ -248,6 +248,8 @@ block = f"""
 {inner}location ^~ {base_path}/ {{
 {inner}  proxy_pass {upstream};
 {inner}  proxy_http_version 1.1;
+{inner}  proxy_intercept_errors on;
+{inner}  error_page 500 502 503 504 = @agentpulse_beta_json_error;
 {inner}  proxy_set_header Host $host;
 {inner}  proxy_set_header X-Real-IP $remote_addr;
 {inner}  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -259,6 +261,12 @@ block = f"""
 {inner}  proxy_request_buffering off;
 {inner}  proxy_read_timeout 3600s;
 {inner}  proxy_send_timeout 3600s;
+{inner}}}
+
+{inner}location @agentpulse_beta_json_error {{
+{inner}  default_type application/json;
+{inner}  add_header Cache-Control "no-store" always;
+{inner}  return 503 '{{"error":"agent_pulse_upstream_unavailable"}}';
 {inner}}}
 {inner}{end}
 """

@@ -80,6 +80,8 @@ describe('dev-run Cloudflare wiring', () => {
     expect(compose).toContain('4355');
     expect(compose).toContain('./apps/tablet/dist:/usr/share/nginx/html:ro');
     expect(edgeNginx).toContain('host.docker.internal:55112');
+    expect(edgeNginx).toContain('proxy_intercept_errors on');
+    expect(edgeNginx).toContain('agent_pulse_upstream_unavailable');
     expect(edgeNginx).toContain('root /usr/share/nginx/html');
     expect(checkScript).toContain('http://127.0.0.1:55112');
     expect(nginx).toContain('location ^~ /agent-pulse/');

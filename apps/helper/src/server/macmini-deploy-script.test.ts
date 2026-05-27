@@ -49,6 +49,9 @@ describe('macmini3 Agent Pulse beta deploy automation', () => {
     expect(reconciler).toContain('# Agent Pulse beta app proxy END');
     expect(reconciler).toContain('location = {base_path}');
     expect(reconciler).toContain('location ^~ {base_path}/');
+    expect(reconciler).toContain('proxy_intercept_errors on');
+    expect(reconciler).toContain('@agentpulse_beta_json_error');
+    expect(reconciler).toContain('agent_pulse_upstream_unavailable');
     expect(reconciler).toContain('http://127.0.0.1:${AGENT_PULSE_EDGE_PORT}');
     expect(reconciler).toContain('http://host.docker.internal:${AGENT_PULSE_EDGE_PORT}');
     expect(reconciler).toContain('Refusing to overwrite an unmarked /agent-pulse nginx location in the target server block.');

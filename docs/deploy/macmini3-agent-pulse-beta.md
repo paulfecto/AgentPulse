@@ -71,6 +71,9 @@ which inserts or updates the marked block:
 The reconciler preserves existing `/project-manager`, `/health`, `/api`, MCP,
 and OAuth routes. It uses `http://127.0.0.1:4355/` for host nginx and
 `http://host.docker.internal:4355/` when the shared edge runs inside Docker.
+The marked Agent Pulse block intercepts upstream `5xx` errors and returns JSON
+`{"error":"agent_pulse_upstream_unavailable"}` instead of an nginx HTML page,
+so Watch/TestFlight clients never try to decode a web page as API data.
 
 Validate:
 

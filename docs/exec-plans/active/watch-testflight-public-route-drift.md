@@ -158,6 +158,10 @@ Stop `https://beta.dope-ai.kr/agent-pulse` from returning Project Manager HTML t
   health checks.
 - The helper LaunchAgent uses `KeepAlive = true`, so a clean signal-triggered
   helper exit is restarted just like a crash.
+- The Docker edge and shared-edge `/agent-pulse` block intercept upstream
+  `5xx` failures and return JSON `{"error":"agent_pulse_upstream_unavailable"}`
+  instead of nginx HTML, so Watch clients never receive a web page from an API
+  route even during helper relay failure.
 
 ### 2026-05-27 Evidence Log
 
@@ -222,6 +226,8 @@ Stop `https://beta.dope-ai.kr/agent-pulse` from returning Project Manager HTML t
 - PASS: final Docker product gate in `node:22-bookworm`:
   `pnpm test`, `pnpm typecheck`, and `pnpm build`; 41 test files and 560 tests
   passed.
+- PASS: added nginx/shared-edge JSON fallback assertions to the deploy script
+  contract tests so future route changes preserve the no-HTML API invariant.
 - PASS: pushed commit `219d884420b1ae0291ee979432fecb7667fc0408` to
   `origin/main`.
 - PASS: macmini3 checkout fast-forwarded to
