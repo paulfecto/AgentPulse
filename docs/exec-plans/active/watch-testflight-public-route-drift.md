@@ -246,6 +246,12 @@ Stop `https://beta.dope-ai.kr/agent-pulse` from returning Project Manager HTML t
   expecting JSON `401`, authenticated `/watch/summary`, and authenticated
   Agent Pulse thread transcript. Every API response stayed JSON, transcript
   messages stayed capped at 8, and no nginx/Project Manager HTML appeared.
+- PASS: controlled upstream-failure proof after deploying `91d6395`:
+  stopping only `com.agentpulse.helper.55110.beta-edge` made public
+  `/agent-pulse/health/get` return HTTP `503` with
+  `content-type: application/json` and body
+  `{"error":"agent_pulse_upstream_unavailable"}`; reinstalling the local helper
+  restored public health to JSON `codexAppServer: connected`.
 
 ## Completion State
 
